@@ -63,16 +63,12 @@ impl CredentialResolver {
         openbao_engine_path: &str,
         role: &str,
     ) -> Result<Vec<(String, String)>, GatewayError> {
-        let openbao_addr = self
-            .config
-            .openbao_addr
-            .as_deref()
-            .ok_or_else(|| GatewayError::Internal("SMCP_GATEWAY_OPENBAO_ADDR is required".to_string()))?;
-        let openbao_token = self
-            .config
-            .openbao_token
-            .as_deref()
-            .ok_or_else(|| GatewayError::Internal("SMCP_GATEWAY_OPENBAO_TOKEN is required".to_string()))?;
+        let openbao_addr = self.config.openbao_addr.as_deref().ok_or_else(|| {
+            GatewayError::Internal("SMCP_GATEWAY_OPENBAO_ADDR is required".to_string())
+        })?;
+        let openbao_token = self.config.openbao_token.as_deref().ok_or_else(|| {
+            GatewayError::Internal("SMCP_GATEWAY_OPENBAO_TOKEN is required".to_string())
+        })?;
 
         if openbao_engine_path.trim().is_empty() || role.trim().is_empty() {
             return Err(GatewayError::Validation(
@@ -101,19 +97,21 @@ impl CredentialResolver {
             )));
         }
 
-        let payload: OpenBaoDynamicResponse = response
-            .json()
-            .await
-            .map_err(|err| GatewayError::Serialization(format!("invalid OpenBao JIT response: {err}")))?;
+        let payload: OpenBaoDynamicResponse = response.json().await.map_err(|err| {
+            GatewayError::Serialization(format!("invalid OpenBao JIT response: {err}"))
+        })?;
 
         let data = payload.data.ok_or_else(|| {
             GatewayError::Serialization("OpenBao JIT response missing data".to_string())
         })?;
-        let token = data.get("token").or_else(|| data.get("password")).ok_or_else(|| {
-            GatewayError::Serialization(
-                "OpenBao JIT response missing token/password field".to_string(),
-            )
-        })?;
+        let token = data
+            .get("token")
+            .or_else(|| data.get("password"))
+            .ok_or_else(|| {
+                GatewayError::Serialization(
+                    "OpenBao JIT response missing token/password field".to_string(),
+                )
+            })?;
 
         Ok(vec![(
             "Authorization".to_string(),
@@ -127,16 +125,12 @@ impl CredentialResolver {
                 "StaticRef key cannot be empty".to_string(),
             ));
         }
-        let openbao_addr = self
-            .config
-            .openbao_addr
-            .as_deref()
-            .ok_or_else(|| GatewayError::Internal("SMCP_GATEWAY_OPENBAO_ADDR is required".to_string()))?;
-        let openbao_token = self
-            .config
-            .openbao_token
-            .as_deref()
-            .ok_or_else(|| GatewayError::Internal("SMCP_GATEWAY_OPENBAO_TOKEN is required".to_string()))?;
+        let openbao_addr = self.config.openbao_addr.as_deref().ok_or_else(|| {
+            GatewayError::Internal("SMCP_GATEWAY_OPENBAO_ADDR is required".to_string())
+        })?;
+        let openbao_token = self.config.openbao_token.as_deref().ok_or_else(|| {
+            GatewayError::Internal("SMCP_GATEWAY_OPENBAO_TOKEN is required".to_string())
+        })?;
 
         let path = format!(
             "{}/v1/{}/data/{}",
@@ -160,15 +154,19 @@ impl CredentialResolver {
             )));
         }
 
-        let payload: OpenBaoKvEnvelope = response
-            .json()
-            .await
-            .map_err(|err| GatewayError::Serialization(format!("invalid OpenBao KV response: {err}")))?;
+        let payload: OpenBaoKvEnvelope = response.json().await.map_err(|err| {
+            GatewayError::Serialization(format!("invalid OpenBao KV response: {err}"))
+        })?;
 
         let token = payload
             .data
             .and_then(|data| data.data)
-            .and_then(|fields| fields.get("token").cloned().or_else(|| fields.get("value").cloned()))
+            .and_then(|fields| {
+                fields
+                    .get("token")
+                    .cloned()
+                    .or_else(|| fields.get("value").cloned())
+            })
             .ok_or_else(|| {
                 GatewayError::Serialization(
                     "OpenBao KV response missing token/value field".to_string(),
@@ -216,12 +214,18 @@ impl CredentialResolver {
             })?;
 
         let form = [
-            ("grant_type", "urn:ietf:params:oauth:grant-type:token-exchange"),
+            (
+                "grant_type",
+                "urn:ietf:params:oauth:grant-type:token-exchange",
+            ),
             (
                 "subject_token_type",
                 "urn:ietf:params:oauth:token-type:access_token",
             ),
-            ("requested_token_type", "urn:ietf:params:oauth:token-type:access_token"),
+            (
+                "requested_token_type",
+                "urn:ietf:params:oauth:token-type:access_token",
+            ),
             ("subject_token", subject_token),
             ("audience", target_service),
             ("client_id", client_id),
@@ -243,12 +247,9 @@ impl CredentialResolver {
             )));
         }
 
-        let payload: KeycloakTokenExchangeResponse = response
-            .json()
-            .await
-            .map_err(|err| GatewayError::Serialization(format!(
-                "invalid Keycloak token exchange response: {err}"
-            )))?;
+        let payload: KeycloakTokenExchangeResponse = response.json().await.map_err(|err| {
+            GatewayError::Serialization(format!("invalid Keycloak token exchange response: {err}"))
+        })?;
 
         Ok(vec![(
             "Authorization".to_string(),

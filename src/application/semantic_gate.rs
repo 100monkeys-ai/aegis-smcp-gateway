@@ -44,7 +44,11 @@ impl SemanticGate {
         args: &[String],
         security_context: &str,
     ) -> Result<SemanticDecision, GatewayError> {
-        if !tool.allowed_subcommands.iter().any(|allowed| allowed == subcommand) {
+        if !tool
+            .allowed_subcommands
+            .iter()
+            .any(|allowed| allowed == subcommand)
+        {
             return Ok(SemanticDecision::Rejected(format!(
                 "subcommand '{subcommand}' is not in allowed_subcommands"
             )));
@@ -89,11 +93,9 @@ impl SemanticGate {
         if verdict.allowed {
             Ok(SemanticDecision::Allowed)
         } else {
-            Ok(SemanticDecision::Rejected(
-                verdict
-                    .reason
-                    .unwrap_or_else(|| "semantic judge rejected command intent".to_string()),
-            ))
+            Ok(SemanticDecision::Rejected(verdict.reason.unwrap_or_else(
+                || "semantic judge rejected command intent".to_string(),
+            )))
         }
     }
 }

@@ -32,6 +32,14 @@ use presentation::grpc::GatewayGrpcService;
 use presentation::invocation::*;
 use presentation::state::AppState;
 
+type RepositoryBundle = (
+    Arc<dyn ApiSpecRepository>,
+    Arc<dyn ToolWorkflowRepository>,
+    Arc<dyn EphemeralCliToolRepository>,
+    Arc<dyn SmcpSessionRepository>,
+    Arc<dyn EventStore>,
+);
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
@@ -39,33 +47,28 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let config = GatewayConfig::from_env();
-    let (specs, workflows, cli_tools, smcp_sessions, event_store): (
-        Arc<dyn ApiSpecRepository>,
-        Arc<dyn ToolWorkflowRepository>,
-        Arc<dyn EphemeralCliToolRepository>,
-        Arc<dyn SmcpSessionRepository>,
-        Arc<dyn EventStore>,
-    ) = if config.database_url.starts_with("postgres://")
-        || config.database_url.starts_with("postgresql://")
-    {
-        let store = PostgresStore::new(&config.database_url).await?;
-        (
-            Arc::new(store.clone()),
-            Arc::new(store.clone()),
-            Arc::new(store.clone()),
-            Arc::new(store.clone()),
-            Arc::new(store),
-        )
-    } else {
-        let store = SqliteStore::new(&config.database_url).await?;
-        (
-            Arc::new(store.clone()),
-            Arc::new(store.clone()),
-            Arc::new(store.clone()),
-            Arc::new(store.clone()),
-            Arc::new(store),
-        )
-    };
+    let (specs, workflows, cli_tools, smcp_sessions, event_store): RepositoryBundle =
+        if config.database_url.starts_with("postgres://")
+            || config.database_url.starts_with("postgresql://")
+        {
+            let store = PostgresStore::new(&config.database_url).await?;
+            (
+                Arc::new(store.clone()),
+                Arc::new(store.clone()),
+                Arc::new(store.clone()),
+                Arc::new(store.clone()),
+                Arc::new(store),
+            )
+        } else {
+            let store = SqliteStore::new(&config.database_url).await?;
+            (
+                Arc::new(store.clone()),
+                Arc::new(store.clone()),
+                Arc::new(store.clone()),
+                Arc::new(store.clone()),
+                Arc::new(store),
+            )
+        };
 
     if std::env::var("SMCP_GATEWAY_BOOTSTRAP_SESSION").is_ok() {
         smcp_sessions

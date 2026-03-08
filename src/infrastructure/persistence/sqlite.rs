@@ -24,7 +24,6 @@ impl SqliteStore {
             .await?;
         Ok(Self { pool })
     }
-
 }
 
 #[async_trait]

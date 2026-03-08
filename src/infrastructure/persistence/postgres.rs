@@ -33,12 +33,14 @@ impl EventStore for PostgresStore {
         event_type: &str,
         payload: &serde_json::Value,
     ) -> Result<(), GatewayError> {
-        sqlx::query("INSERT INTO gateway_events(event_type, payload, created_at) VALUES ($1, $2, $3)")
-            .bind(event_type)
-            .bind(payload.to_string())
-            .bind(Utc::now().to_rfc3339())
-            .execute(&self.pool)
-            .await?;
+        sqlx::query(
+            "INSERT INTO gateway_events(event_type, payload, created_at) VALUES ($1, $2, $3)",
+        )
+        .bind(event_type)
+        .bind(payload.to_string())
+        .bind(Utc::now().to_rfc3339())
+        .execute(&self.pool)
+        .await?;
         Ok(())
     }
 }
@@ -323,7 +325,9 @@ fn cli_tool_from_row(row: sqlx::postgres::PgRow) -> Result<EphemeralCliTool, Gat
         )?,
         require_semantic_judge: row.try_get("require_semantic_judge")?,
         default_timeout_seconds: row.try_get::<i64, _>("default_timeout_seconds")? as u32,
-        registry_credentials_ref: registry_ref.map(|value| serde_json::from_str(&value)).transpose()?,
+        registry_credentials_ref: registry_ref
+            .map(|value| serde_json::from_str(&value))
+            .transpose()?,
     })
 }
 

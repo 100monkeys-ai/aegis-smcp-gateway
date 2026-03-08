@@ -96,6 +96,8 @@ pub enum CredentialResolutionPath {
         openbao_engine_path: String,
         role: String,
     },
-    HumanDelegated { target_service: String },
+    HumanDelegated {
+        target_service: String,
+    },
     StaticRef(CredentialRef),
 }

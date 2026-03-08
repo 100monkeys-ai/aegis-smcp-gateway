@@ -32,8 +32,8 @@ impl GatewayConfig {
             env::var("SMCP_GATEWAY_GRPC_BIND").unwrap_or_else(|_| "0.0.0.0:50055".to_string());
         let database_url =
             env::var("SMCP_GATEWAY_DB").unwrap_or_else(|_| "sqlite://gateway.db".to_string());
-        let operator_jwt_public_key_pem = env::var("SMCP_GATEWAY_OPERATOR_JWT_PUBLIC_KEY_PEM")
-            .unwrap_or_else(|_| String::new());
+        let operator_jwt_public_key_pem =
+            env::var("SMCP_GATEWAY_OPERATOR_JWT_PUBLIC_KEY_PEM").unwrap_or_else(|_| String::new());
         let operator_jwt_issuer = env::var("SMCP_GATEWAY_OPERATOR_JWT_ISSUER")
             .unwrap_or_else(|_| "aegis-keycloak".to_string());
         let operator_jwt_audience = env::var("SMCP_GATEWAY_OPERATOR_JWT_AUDIENCE")
@@ -50,8 +50,8 @@ impl GatewayConfig {
         let openbao_token = env::var("SMCP_GATEWAY_OPENBAO_TOKEN")
             .ok()
             .filter(|value| !value.trim().is_empty());
-        let openbao_kv_mount = env::var("SMCP_GATEWAY_OPENBAO_KV_MOUNT")
-            .unwrap_or_else(|_| "secret".to_string());
+        let openbao_kv_mount =
+            env::var("SMCP_GATEWAY_OPENBAO_KV_MOUNT").unwrap_or_else(|_| "secret".to_string());
         let keycloak_token_exchange_url = env::var("SMCP_GATEWAY_KEYCLOAK_TOKEN_EXCHANGE_URL")
             .ok()
             .filter(|value| !value.trim().is_empty());
