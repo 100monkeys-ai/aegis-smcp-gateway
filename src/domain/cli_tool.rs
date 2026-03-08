@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::domain::api_spec::CredentialRef;
+use crate::domain::CredentialResolutionPath;
 use crate::infrastructure::errors::GatewayError;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -11,7 +11,7 @@ pub struct EphemeralCliTool {
     pub allowed_subcommands: Vec<String>,
     pub require_semantic_judge: bool,
     pub default_timeout_seconds: u32,
-    pub registry_credentials_ref: Option<CredentialRef>,
+    pub registry_credential_path: Option<CredentialResolutionPath>,
 }
 
 impl EphemeralCliTool {
@@ -61,7 +61,7 @@ mod tests {
             allowed_subcommands: vec!["plan".to_string()],
             require_semantic_judge: true,
             default_timeout_seconds: 301,
-            registry_credentials_ref: None,
+            registry_credential_path: None,
         };
         assert!(tool.validate().is_err());
     }
@@ -75,7 +75,7 @@ mod tests {
             allowed_subcommands: Vec::new(),
             require_semantic_judge: true,
             default_timeout_seconds: 60,
-            registry_credentials_ref: None,
+            registry_credential_path: None,
         };
         assert!(tool.validate().is_err());
     }

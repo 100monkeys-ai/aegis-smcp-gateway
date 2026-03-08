@@ -163,32 +163,180 @@ impl CredentialResolver {
 
     pub async fn resolve_registry_credentials(
         &self,
+        path: &CredentialResolutionPath,
+        zaru_user_token: Option<&str>,
+        allow_human_delegated_credentials: bool,
+    ) -> Result<RegistryCredentials, GatewayError> {
+        match path {
+            CredentialResolutionPath::StaticRef(reference) => {
+                self.resolve_registry_credentials_from_static_ref(reference)
+                    .await
+            }
+            CredentialResolutionPath::SystemJit {
+                openbao_engine_path,
+                role,
+            } => {
+                self.resolve_registry_credentials_from_system_jit(openbao_engine_path, role)
+                    .await
+            }
+            CredentialResolutionPath::HumanDelegated { target_service } => {
+                if !allow_human_delegated_credentials {
+                    return Err(GatewayError::Forbidden);
+                }
+                let headers = self
+                    .resolve_human_delegated(target_service, zaru_user_token)
+                    .await?;
+                let token_header = headers
+                    .into_iter()
+                    .find(|(name, _)| name.eq_ignore_ascii_case("authorization"))
+                    .ok_or_else(|| {
+                        GatewayError::Serialization(
+                            "human delegated response missing authorization header".to_string(),
+                        )
+                    })?;
+                let token_value = token_header
+                    .1
+                    .expose()
+                    .strip_prefix("Bearer ")
+                    .or_else(|| token_header.1.expose().strip_prefix("bearer "))
+                    .map(ToString::to_string)
+                    .unwrap_or_else(|| token_header.1.expose().to_string());
+                Ok(RegistryCredentials {
+                    registry: target_service.clone(),
+                    username: SensitiveString::new("oauth2accesstoken"),
+                    password: SensitiveString::new(token_value),
+                })
+            }
+            CredentialResolutionPath::Auto {
+                system_jit_openbao_engine_path,
+                system_jit_role,
+                target_service,
+            } => {
+                if zaru_user_token.is_some() {
+                    if !allow_human_delegated_credentials {
+                        return Err(GatewayError::Forbidden);
+                    }
+                    let headers = self
+                        .resolve_human_delegated(target_service, zaru_user_token)
+                        .await?;
+                    let token_header = headers
+                        .into_iter()
+                        .find(|(name, _)| name.eq_ignore_ascii_case("authorization"))
+                        .ok_or_else(|| {
+                            GatewayError::Serialization(
+                                "human delegated response missing authorization header".to_string(),
+                            )
+                        })?;
+                    let token_value = token_header
+                        .1
+                        .expose()
+                        .strip_prefix("Bearer ")
+                        .or_else(|| token_header.1.expose().strip_prefix("bearer "))
+                        .map(ToString::to_string)
+                        .unwrap_or_else(|| token_header.1.expose().to_string());
+                    Ok(RegistryCredentials {
+                        registry: target_service.clone(),
+                        username: SensitiveString::new("oauth2accesstoken"),
+                        password: SensitiveString::new(token_value),
+                    })
+                } else {
+                    self.resolve_registry_credentials_from_system_jit(
+                        system_jit_openbao_engine_path,
+                        system_jit_role,
+                    )
+                    .await
+                }
+            }
+        }
+    }
+
+    async fn resolve_registry_credentials_from_static_ref(
+        &self,
         reference: &CredentialRef,
     ) -> Result<RegistryCredentials, GatewayError> {
         let fields = self.fetch_kv_fields(&reference.key).await?;
+        self.registry_credentials_from_map(&fields, Some("index.docker.io"))
+    }
+
+    async fn resolve_registry_credentials_from_system_jit(
+        &self,
+        openbao_engine_path: &str,
+        role: &str,
+    ) -> Result<RegistryCredentials, GatewayError> {
+        let openbao_addr = self.config.openbao_addr.as_deref().ok_or_else(|| {
+            GatewayError::Internal("SMCP_GATEWAY_OPENBAO_ADDR is required".to_string())
+        })?;
+        let openbao_token = self.config.openbao_token.as_deref().ok_or_else(|| {
+            GatewayError::Internal("SMCP_GATEWAY_OPENBAO_TOKEN is required".to_string())
+        })?;
+
+        if openbao_engine_path.trim().is_empty() || role.trim().is_empty() {
+            return Err(GatewayError::Validation(
+                "SystemJit requires non-empty openbao_engine_path and role".to_string(),
+            ));
+        }
+
+        let path = format!(
+            "{}/v1/{}/creds/{}",
+            openbao_addr.trim_end_matches('/'),
+            openbao_engine_path.trim_matches('/'),
+            role
+        );
+        let response = self
+            .http_client
+            .get(path)
+            .header("X-Vault-Token", openbao_token)
+            .send()
+            .await
+            .map_err(|err| GatewayError::Http(format!("OpenBao JIT request failed: {err}")))?;
+
+        if !response.status().is_success() {
+            return Err(GatewayError::Http(format!(
+                "OpenBao JIT request returned {}",
+                response.status()
+            )));
+        }
+
+        let payload: OpenBaoDynamicResponse = response.json().await.map_err(|err| {
+            GatewayError::Serialization(format!("invalid OpenBao JIT response: {err}"))
+        })?;
+        let data = payload.data.ok_or_else(|| {
+            GatewayError::Serialization("OpenBao JIT response missing data".to_string())
+        })?;
+        self.registry_credentials_from_map(&data, None)
+    }
+
+    fn registry_credentials_from_map(
+        &self,
+        fields: &HashMap<String, String>,
+        default_registry: Option<&str>,
+    ) -> Result<RegistryCredentials, GatewayError> {
         let registry = fields
             .get("registry")
             .cloned()
             .or_else(|| fields.get("server").cloned())
             .or_else(|| fields.get("host").cloned())
+            .or_else(|| default_registry.map(ToString::to_string))
             .unwrap_or_else(|| "index.docker.io".to_string());
         let username = fields
             .get("username")
             .cloned()
             .or_else(|| fields.get("user").cloned())
+            .or_else(|| fields.get("access_key").cloned())
             .ok_or_else(|| {
                 GatewayError::Serialization(
-                    "OpenBao registry credential missing username/user field".to_string(),
+                    "registry credential missing username/user/access_key field".to_string(),
                 )
             })?;
         let password = fields
             .get("password")
             .cloned()
+            .or_else(|| fields.get("secret_key").cloned())
             .or_else(|| fields.get("token").cloned())
             .or_else(|| fields.get("value").cloned())
             .ok_or_else(|| {
                 GatewayError::Serialization(
-                    "OpenBao registry credential missing password/token/value field".to_string(),
+                    "registry credential missing password/secret_key/token/value field".to_string(),
                 )
             })?;
 

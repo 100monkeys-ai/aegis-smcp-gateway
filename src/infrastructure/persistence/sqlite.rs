@@ -5,8 +5,9 @@ use uuid::Uuid;
 
 use crate::domain::{
     ApiSpec, ApiSpecId, ApiSpecRepository, ApiSpecSummary, EphemeralCliTool,
-    EphemeralCliToolRepository, EphemeralCliToolSummary, SmcpSessionRecord, SmcpSessionRepository,
-    ToolWorkflow, ToolWorkflowRepository, ToolWorkflowSummary, WorkflowId,
+    EphemeralCliToolRepository, EphemeralCliToolSummary, SecurityContext,
+    SecurityContextRepository, SmcpSessionRecord, SmcpSessionRepository, ToolWorkflow,
+    ToolWorkflowRepository, ToolWorkflowSummary, WorkflowId,
 };
 use crate::infrastructure::errors::GatewayError;
 use crate::infrastructure::persistence::EventStore;
@@ -234,7 +235,7 @@ impl EphemeralCliToolRepository for SqliteStore {
         tool.validate()?;
         sqlx::query(
             r#"INSERT OR REPLACE INTO cli_tools
-            (name, description, docker_image, allowed_subcommands, require_semantic_judge, default_timeout_seconds, registry_credentials_ref)
+            (name, description, docker_image, allowed_subcommands, require_semantic_judge, default_timeout_seconds, registry_credential_path)
             VALUES (?, ?, ?, ?, ?, ?, ?)"#,
         )
         .bind(tool.name)
@@ -243,7 +244,11 @@ impl EphemeralCliToolRepository for SqliteStore {
         .bind(serde_json::to_string(&tool.allowed_subcommands)?)
         .bind(i64::from(tool.require_semantic_judge))
         .bind(i64::from(tool.default_timeout_seconds))
-        .bind(tool.registry_credentials_ref.map(|v| serde_json::to_string(&v)).transpose()?)
+        .bind(
+            tool.registry_credential_path
+                .map(|v| serde_json::to_string(&v))
+                .transpose()?,
+        )
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -251,7 +256,7 @@ impl EphemeralCliToolRepository for SqliteStore {
 
     async fn find_by_name(&self, name: &str) -> Result<Option<EphemeralCliTool>, GatewayError> {
         let row = sqlx::query(
-            "SELECT name,description,docker_image,allowed_subcommands,require_semantic_judge,default_timeout_seconds,registry_credentials_ref FROM cli_tools WHERE name=?",
+            "SELECT name,description,docker_image,allowed_subcommands,require_semantic_judge,default_timeout_seconds,registry_credential_path FROM cli_tools WHERE name=?",
         )
         .bind(name)
         .fetch_optional(&self.pool)
@@ -290,7 +295,7 @@ impl EphemeralCliToolRepository for SqliteStore {
 }
 
 fn cli_tool_from_row(row: sqlx::sqlite::SqliteRow) -> Result<EphemeralCliTool, GatewayError> {
-    let registry_ref: Option<String> = row.try_get("registry_credentials_ref")?;
+    let registry_path: Option<String> = row.try_get("registry_credential_path")?;
     Ok(EphemeralCliTool {
         name: row.try_get("name")?,
         description: row.try_get("description")?,
@@ -300,7 +305,9 @@ fn cli_tool_from_row(row: sqlx::sqlite::SqliteRow) -> Result<EphemeralCliTool, G
         )?,
         require_semantic_judge: row.try_get::<i64, _>("require_semantic_judge")? != 0,
         default_timeout_seconds: row.try_get::<i64, _>("default_timeout_seconds")? as u32,
-        registry_credentials_ref: registry_ref.map(|v| serde_json::from_str(&v)).transpose()?,
+        registry_credential_path: registry_path
+            .map(|v| serde_json::from_str(&v))
+            .transpose()?,
     })
 }
 
@@ -353,5 +360,45 @@ impl SmcpSessionRepository for SqliteStore {
             })
         })
         .transpose()
+    }
+}
+
+#[async_trait]
+impl SecurityContextRepository for SqliteStore {
+    async fn save(&self, context: SecurityContext) -> Result<(), GatewayError> {
+        sqlx::query("INSERT OR REPLACE INTO security_contexts(name, capabilities) VALUES (?, ?)")
+            .bind(context.name)
+            .bind(serde_json::to_string(&context.capabilities)?)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    async fn find_by_name(&self, name: &str) -> Result<Option<SecurityContext>, GatewayError> {
+        let row = sqlx::query("SELECT name, capabilities FROM security_contexts WHERE name = ?")
+            .bind(name)
+            .fetch_optional(&self.pool)
+            .await?;
+        row.map(|r| {
+            Ok(SecurityContext {
+                name: r.try_get("name")?,
+                capabilities: serde_json::from_str(&r.try_get::<String, _>("capabilities")?)?,
+            })
+        })
+        .transpose()
+    }
+
+    async fn list_all(&self) -> Result<Vec<SecurityContext>, GatewayError> {
+        let rows = sqlx::query("SELECT name, capabilities FROM security_contexts ORDER BY name")
+            .fetch_all(&self.pool)
+            .await?;
+        rows.into_iter()
+            .map(|row| {
+                Ok(SecurityContext {
+                    name: row.try_get("name")?,
+                    capabilities: serde_json::from_str(&row.try_get::<String, _>("capabilities")?)?,
+                })
+            })
+            .collect()
     }
 }

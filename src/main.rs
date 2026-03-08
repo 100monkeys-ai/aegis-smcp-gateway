@@ -17,8 +17,8 @@ use application::{
     CliEngine, CredentialResolver, ExplorerService, InvocationService, SemanticGate, WorkflowEngine,
 };
 use domain::{
-    ApiSpecRepository, EphemeralCliToolRepository, SmcpSessionRecord, SmcpSessionRepository,
-    ToolWorkflowRepository,
+    ApiSpecRepository, EphemeralCliToolRepository, SecurityContextRepository, SmcpSessionRecord,
+    SmcpSessionRepository, ToolWorkflowRepository,
 };
 use infrastructure::auth::require_operator;
 use infrastructure::config::GatewayConfig;
@@ -26,7 +26,7 @@ use infrastructure::http_client::HttpClient;
 use infrastructure::persistence::postgres::PostgresStore;
 use infrastructure::persistence::sqlite::SqliteStore;
 use infrastructure::persistence::EventStore;
-use infrastructure::security_contexts::InMemorySecurityContextStore;
+use infrastructure::security_contexts::default_security_contexts;
 use presentation::control_plane::*;
 use presentation::grpc::proto::gateway_invocation_service_server::GatewayInvocationServiceServer;
 use presentation::grpc::proto::tool_workflow_service_server::ToolWorkflowServiceServer;
@@ -39,6 +39,7 @@ type RepositoryBundle = (
     Arc<dyn ToolWorkflowRepository>,
     Arc<dyn EphemeralCliToolRepository>,
     Arc<dyn SmcpSessionRepository>,
+    Arc<dyn SecurityContextRepository>,
     Arc<dyn EventStore>,
 );
 
@@ -49,12 +50,13 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let config = GatewayConfig::from_env();
-    let (specs, workflows, cli_tools, smcp_sessions, event_store): RepositoryBundle =
+    let (specs, workflows, cli_tools, smcp_sessions, security_contexts, event_store): RepositoryBundle =
         if config.database_url.starts_with("postgres://")
             || config.database_url.starts_with("postgresql://")
         {
             let store = PostgresStore::new(&config.database_url).await?;
             (
+                Arc::new(store.clone()),
                 Arc::new(store.clone()),
                 Arc::new(store.clone()),
                 Arc::new(store.clone()),
@@ -68,9 +70,16 @@ async fn main() -> anyhow::Result<()> {
                 Arc::new(store.clone()),
                 Arc::new(store.clone()),
                 Arc::new(store.clone()),
+                Arc::new(store.clone()),
                 Arc::new(store),
             )
         };
+
+    if security_contexts.list_all().await?.is_empty() {
+        for context in default_security_contexts() {
+            security_contexts.save(context).await?;
+        }
+    }
 
     if std::env::var("SMCP_GATEWAY_BOOTSTRAP_SESSION").is_ok() {
         smcp_sessions
@@ -90,7 +99,6 @@ async fn main() -> anyhow::Result<()> {
     let http_client = HttpClient::new()?;
     let credential_resolver = CredentialResolver::new(config.clone());
     let semantic_gate = SemanticGate::new(config.semantic_judge_url.clone());
-    let security_contexts = Arc::new(InMemorySecurityContextStore::with_defaults());
 
     let workflow_engine = WorkflowEngine::new(
         workflows.clone(),

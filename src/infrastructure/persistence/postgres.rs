@@ -5,8 +5,9 @@ use uuid::Uuid;
 
 use crate::domain::{
     ApiSpec, ApiSpecId, ApiSpecRepository, ApiSpecSummary, EphemeralCliTool,
-    EphemeralCliToolRepository, EphemeralCliToolSummary, SmcpSessionRecord, SmcpSessionRepository,
-    ToolWorkflow, ToolWorkflowRepository, ToolWorkflowSummary, WorkflowId,
+    EphemeralCliToolRepository, EphemeralCliToolSummary, SecurityContext,
+    SecurityContextRepository, SmcpSessionRecord, SmcpSessionRepository, ToolWorkflow,
+    ToolWorkflowRepository, ToolWorkflowSummary, WorkflowId,
 };
 use crate::infrastructure::errors::GatewayError;
 use crate::infrastructure::persistence::EventStore;
@@ -249,7 +250,7 @@ impl EphemeralCliToolRepository for PostgresStore {
         tool.validate()?;
         sqlx::query(
             r#"INSERT INTO cli_tools
-            (name, description, docker_image, allowed_subcommands, require_semantic_judge, default_timeout_seconds, registry_credentials_ref)
+            (name, description, docker_image, allowed_subcommands, require_semantic_judge, default_timeout_seconds, registry_credential_path)
             VALUES ($1, $2, $3, $4, $5, $6, $7)
             ON CONFLICT (name) DO UPDATE SET
               description = EXCLUDED.description,
@@ -257,7 +258,7 @@ impl EphemeralCliToolRepository for PostgresStore {
               allowed_subcommands = EXCLUDED.allowed_subcommands,
               require_semantic_judge = EXCLUDED.require_semantic_judge,
               default_timeout_seconds = EXCLUDED.default_timeout_seconds,
-              registry_credentials_ref = EXCLUDED.registry_credentials_ref"#,
+              registry_credential_path = EXCLUDED.registry_credential_path"#,
         )
         .bind(tool.name)
         .bind(tool.description)
@@ -266,7 +267,7 @@ impl EphemeralCliToolRepository for PostgresStore {
         .bind(tool.require_semantic_judge)
         .bind(i64::from(tool.default_timeout_seconds))
         .bind(
-            tool.registry_credentials_ref
+            tool.registry_credential_path
                 .map(|value| serde_json::to_string(&value))
                 .transpose()?,
         )
@@ -277,7 +278,7 @@ impl EphemeralCliToolRepository for PostgresStore {
 
     async fn find_by_name(&self, name: &str) -> Result<Option<EphemeralCliTool>, GatewayError> {
         let row = sqlx::query(
-            "SELECT name,description,docker_image,allowed_subcommands,require_semantic_judge,default_timeout_seconds,registry_credentials_ref FROM cli_tools WHERE name=$1",
+            "SELECT name,description,docker_image,allowed_subcommands,require_semantic_judge,default_timeout_seconds,registry_credential_path FROM cli_tools WHERE name=$1",
         )
         .bind(name)
         .fetch_optional(&self.pool)
@@ -315,7 +316,7 @@ impl EphemeralCliToolRepository for PostgresStore {
 }
 
 fn cli_tool_from_row(row: sqlx::postgres::PgRow) -> Result<EphemeralCliTool, GatewayError> {
-    let registry_ref: Option<String> = row.try_get("registry_credentials_ref")?;
+    let registry_path: Option<String> = row.try_get("registry_credential_path")?;
     Ok(EphemeralCliTool {
         name: row.try_get("name")?,
         description: row.try_get("description")?,
@@ -325,7 +326,7 @@ fn cli_tool_from_row(row: sqlx::postgres::PgRow) -> Result<EphemeralCliTool, Gat
         )?,
         require_semantic_judge: row.try_get("require_semantic_judge")?,
         default_timeout_seconds: row.try_get::<i64, _>("default_timeout_seconds")? as u32,
-        registry_credentials_ref: registry_ref
+        registry_credential_path: registry_path
             .map(|value| serde_json::from_str(&value))
             .transpose()?,
     })
@@ -391,5 +392,49 @@ impl SmcpSessionRepository for PostgresStore {
             })
         })
         .transpose()
+    }
+}
+
+#[async_trait]
+impl SecurityContextRepository for PostgresStore {
+    async fn save(&self, context: SecurityContext) -> Result<(), GatewayError> {
+        sqlx::query(
+            r#"INSERT INTO security_contexts(name, capabilities)
+               VALUES ($1, $2)
+               ON CONFLICT (name) DO UPDATE SET capabilities = EXCLUDED.capabilities"#,
+        )
+        .bind(context.name)
+        .bind(serde_json::to_string(&context.capabilities)?)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn find_by_name(&self, name: &str) -> Result<Option<SecurityContext>, GatewayError> {
+        let row = sqlx::query("SELECT name, capabilities FROM security_contexts WHERE name = $1")
+            .bind(name)
+            .fetch_optional(&self.pool)
+            .await?;
+        row.map(|r| {
+            Ok(SecurityContext {
+                name: r.try_get("name")?,
+                capabilities: serde_json::from_str(&r.try_get::<String, _>("capabilities")?)?,
+            })
+        })
+        .transpose()
+    }
+
+    async fn list_all(&self) -> Result<Vec<SecurityContext>, GatewayError> {
+        let rows = sqlx::query("SELECT name, capabilities FROM security_contexts ORDER BY name")
+            .fetch_all(&self.pool)
+            .await?;
+        rows.into_iter()
+            .map(|row| {
+                Ok(SecurityContext {
+                    name: row.try_get("name")?,
+                    capabilities: serde_json::from_str(&row.try_get::<String, _>("capabilities")?)?,
+                })
+            })
+            .collect()
     }
 }

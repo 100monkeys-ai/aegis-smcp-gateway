@@ -26,7 +26,7 @@ CREATE TABLE IF NOT EXISTS cli_tools (
   allowed_subcommands TEXT NOT NULL,
   require_semantic_judge BOOLEAN NOT NULL,
   default_timeout_seconds INTEGER NOT NULL,
-  registry_credentials_ref TEXT
+  registry_credential_path TEXT
 );
 
 CREATE TABLE IF NOT EXISTS smcp_sessions (
@@ -38,6 +38,11 @@ CREATE TABLE IF NOT EXISTS smcp_sessions (
   session_status TEXT NOT NULL,
   expires_at TEXT NOT NULL,
   allowed_tool_patterns TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS security_contexts (
+  name TEXT PRIMARY KEY,
+  capabilities TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS gateway_events (

@@ -216,7 +216,7 @@ pub struct RegisterCliToolRequest {
     pub allowed_subcommands: Vec<String>,
     pub require_semantic_judge: bool,
     pub default_timeout_seconds: u32,
-    pub registry_credentials_ref: Option<crate::domain::CredentialRef>,
+    pub registry_credential_path: Option<crate::domain::CredentialResolutionPath>,
 }
 
 pub async fn register_cli_tool(
@@ -230,7 +230,7 @@ pub async fn register_cli_tool(
         allowed_subcommands: req.allowed_subcommands,
         require_semantic_judge: req.require_semantic_judge,
         default_timeout_seconds: req.default_timeout_seconds,
-        registry_credentials_ref: req.registry_credentials_ref,
+        registry_credential_path: req.registry_credential_path,
     };
     tool.validate().map_err(error_response)?;
     let event_name = tool.name.clone();

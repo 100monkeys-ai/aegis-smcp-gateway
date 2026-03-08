@@ -115,7 +115,7 @@ mod tests {
             allowed_subcommands: vec!["plan".to_string()],
             require_semantic_judge: false,
             default_timeout_seconds: 60,
-            registry_credentials_ref: None,
+            registry_credential_path: None,
         };
 
         let verdict = gate

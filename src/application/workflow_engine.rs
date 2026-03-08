@@ -336,3 +336,53 @@ fn target_service_from_credential_path(path: &CredentialResolutionPath) -> Strin
         _ => "unknown".to_string(),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn human_delegated_requires_security_context_capability() {
+        let path = CredentialResolutionPath::HumanDelegated {
+            target_service: "github".to_string(),
+        };
+        let result = resolve_credential_path_for_session(&path, Some("token"), false);
+        assert!(matches!(result, Err(GatewayError::Forbidden)));
+    }
+
+    #[test]
+    fn auto_uses_system_jit_without_user_token() {
+        let path = CredentialResolutionPath::Auto {
+            system_jit_openbao_engine_path: "aws".to_string(),
+            system_jit_role: "reader".to_string(),
+            target_service: "ghcr.io".to_string(),
+        };
+        let resolved = resolve_credential_path_for_session(&path, None, true).unwrap();
+        match resolved {
+            CredentialResolutionPath::SystemJit {
+                openbao_engine_path,
+                role,
+            } => {
+                assert_eq!(openbao_engine_path, "aws");
+                assert_eq!(role, "reader");
+            }
+            _ => panic!("expected SystemJit"),
+        }
+    }
+
+    #[test]
+    fn auto_uses_human_delegated_with_user_token() {
+        let path = CredentialResolutionPath::Auto {
+            system_jit_openbao_engine_path: "aws".to_string(),
+            system_jit_role: "reader".to_string(),
+            target_service: "github".to_string(),
+        };
+        let resolved = resolve_credential_path_for_session(&path, Some("token"), true).unwrap();
+        match resolved {
+            CredentialResolutionPath::HumanDelegated { target_service } => {
+                assert_eq!(target_service, "github");
+            }
+            _ => panic!("expected HumanDelegated"),
+        }
+    }
+}

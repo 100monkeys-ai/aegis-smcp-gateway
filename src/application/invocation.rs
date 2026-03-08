@@ -132,6 +132,10 @@ impl InvocationService {
                     command,
                     args,
                     fsal_volume_id,
+                    zaru_user_token: zaru_user_token.map(ToString::to_string),
+                    allow_human_delegated_credentials: security_context
+                        .capabilities
+                        .allow_human_delegated_credentials,
                 })
                 .await
         } else {
@@ -202,6 +206,10 @@ impl InvocationService {
                     command,
                     args: cli_args,
                     fsal_volume_id,
+                    zaru_user_token: zaru_user_token.map(ToString::to_string),
+                    allow_human_delegated_credentials: security_context
+                        .capabilities
+                        .allow_human_delegated_credentials,
                 })
                 .await
         } else {

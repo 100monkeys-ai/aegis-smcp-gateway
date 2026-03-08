@@ -9,7 +9,7 @@ use tokio::process::Command;
 
 use crate::application::credential_resolver::{CredentialResolver, RegistryCredentials};
 use crate::application::semantic_gate::{SemanticDecision, SemanticGate};
-use crate::domain::{EphemeralCliToolRepository, GatewayEvent};
+use crate::domain::{CredentialResolutionPath, EphemeralCliToolRepository, GatewayEvent};
 use crate::infrastructure::config::GatewayConfig;
 use crate::infrastructure::errors::GatewayError;
 use crate::infrastructure::persistence::EventStore;
@@ -32,6 +32,8 @@ pub struct CliInvocation {
     pub command: String,
     pub args: Vec<String>,
     pub fsal_volume_id: String,
+    pub zaru_user_token: Option<String>,
+    pub allow_human_delegated_credentials: bool,
 }
 
 impl CliEngine {
@@ -92,10 +94,16 @@ impl CliEngine {
             SemanticDecision::Allowed => {}
         }
 
-        let registry_for_logout = if let Some(registry_ref) = &tool.registry_credentials_ref {
+        let registry_for_logout = if let Some(path) = &tool.registry_credential_path {
+            let resolution_path_label = credential_path_label(path);
+            let target_service = credential_path_target_service(path);
             let creds = match self
                 .credential_resolver
-                .resolve_registry_credentials(registry_ref)
+                .resolve_registry_credentials(
+                    path,
+                    invocation.zaru_user_token.as_deref(),
+                    invocation.allow_human_delegated_credentials,
+                )
                 .await
             {
                 Ok(credentials) => {
@@ -104,8 +112,8 @@ impl CliEngine {
                             "CredentialExchangeCompleted",
                             &serde_json::to_value(GatewayEvent::CredentialExchangeCompleted {
                                 execution_id: invocation.execution_id.clone(),
-                                resolution_path: "static_ref".to_string(),
-                                target_service: "container_registry".to_string(),
+                                resolution_path: resolution_path_label.to_string(),
+                                target_service: target_service.to_string(),
                                 completed_at: chrono::Utc::now(),
                             })?,
                         )
@@ -118,7 +126,7 @@ impl CliEngine {
                             "CredentialExchangeFailed",
                             &serde_json::to_value(GatewayEvent::CredentialExchangeFailed {
                                 execution_id: invocation.execution_id.clone(),
-                                resolution_path: "static_ref".to_string(),
+                                resolution_path: resolution_path_label.to_string(),
                                 reason: err.to_string(),
                                 failed_at: chrono::Utc::now(),
                             })?,
@@ -242,6 +250,23 @@ impl CliEngine {
             "stdout": String::from_utf8_lossy(&stdout).to_string(),
             "stderr": String::from_utf8_lossy(&stderr).to_string()
         }))
+    }
+}
+
+fn credential_path_label(path: &CredentialResolutionPath) -> &'static str {
+    match path {
+        CredentialResolutionPath::SystemJit { .. } => "system_jit",
+        CredentialResolutionPath::HumanDelegated { .. } => "human_delegated",
+        CredentialResolutionPath::Auto { .. } => "auto",
+        CredentialResolutionPath::StaticRef(_) => "static_ref",
+    }
+}
+
+fn credential_path_target_service(path: &CredentialResolutionPath) -> &str {
+    match path {
+        CredentialResolutionPath::HumanDelegated { target_service }
+        | CredentialResolutionPath::Auto { target_service, .. } => target_service,
+        _ => "container_registry",
     }
 }
 

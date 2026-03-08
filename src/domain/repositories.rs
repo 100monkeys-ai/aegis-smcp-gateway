@@ -46,7 +46,9 @@ pub trait SmcpSessionRepository: Send + Sync {
 
 #[async_trait]
 pub trait SecurityContextRepository: Send + Sync {
+    async fn save(&self, context: SecurityContext) -> Result<(), GatewayError>;
     async fn find_by_name(&self, name: &str) -> Result<Option<SecurityContext>, GatewayError>;
+    async fn list_all(&self) -> Result<Vec<SecurityContext>, GatewayError>;
 }
 
 #[derive(Debug, Clone)]
