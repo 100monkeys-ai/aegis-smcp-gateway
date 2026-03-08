@@ -24,6 +24,9 @@ use infrastructure::config::GatewayConfig;
 use infrastructure::http_client::HttpClient;
 use infrastructure::persistence::sqlite::SqliteStore;
 use presentation::control_plane::*;
+use presentation::grpc::proto::gateway_invocation_service_server::GatewayInvocationServiceServer;
+use presentation::grpc::proto::tool_workflow_service_server::ToolWorkflowServiceServer;
+use presentation::grpc::GatewayGrpcService;
 use presentation::invocation::*;
 use presentation::state::AppState;
 
@@ -115,11 +118,27 @@ async fn main() -> anyhow::Result<()> {
         .route("/v1/invoke", post(invoke_smcp))
         .route("/v1/invoke/internal", post(invoke_internal))
         .route("/health", get(|| async { "ok" }))
-        .with_state(state);
+        .with_state(state.clone());
 
     let listener = tokio::net::TcpListener::bind(&config.bind_addr).await?;
     tracing::info!("aegis-smcp-gateway listening on {}", config.bind_addr);
-    axum::serve(listener, app).await?;
+
+    let grpc_addr: std::net::SocketAddr = config.grpc_bind_addr.parse()?;
+    let grpc_service = GatewayGrpcService::new(state);
+    tracing::info!(
+        "aegis-smcp-gateway gRPC listening on {}",
+        config.grpc_bind_addr
+    );
+
+    let (http_result, grpc_result) = tokio::join!(
+        axum::serve(listener, app),
+        tonic::transport::Server::builder()
+            .add_service(ToolWorkflowServiceServer::new(grpc_service.clone()))
+            .add_service(GatewayInvocationServiceServer::new(grpc_service))
+            .serve(grpc_addr),
+    );
+    http_result?;
+    grpc_result?;
 
     Ok(())
 }

@@ -1,0 +1,131 @@
+syntax = "proto3";
+
+package aegis.smcp_gateway.v1;
+
+service ToolWorkflowService {
+  rpc CreateWorkflow(CreateWorkflowRequest) returns (CreateWorkflowResponse);
+  rpc GetWorkflow(GetWorkflowRequest) returns (GetWorkflowResponse);
+  rpc ListWorkflows(ListWorkflowsRequest) returns (ListWorkflowsResponse);
+  rpc UpdateWorkflow(UpdateWorkflowRequest) returns (UpdateWorkflowResponse);
+  rpc DeleteWorkflow(DeleteWorkflowRequest) returns (DeleteWorkflowResponse);
+}
+
+service GatewayInvocationService {
+  rpc InvokeWorkflow(InvokeWorkflowRequest) returns (InvokeWorkflowResponse);
+  rpc InvokeCli(InvokeCliRequest) returns (InvokeCliResponse);
+  rpc ExploreApi(ExploreApiRequest) returns (ExploreApiResponse);
+  rpc ListTools(ListToolsRequest) returns (ListToolsResponse);
+}
+
+message WorkflowStep {
+  string name = 1;
+  string operation_id = 2;
+  string body_template = 3;
+  map<string, string> extractors = 4;
+  string on_error = 5;
+}
+
+message Workflow {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+  string api_spec_id = 4;
+  string input_schema_json = 5;
+  repeated WorkflowStep steps = 6;
+}
+
+message WorkflowSummary {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+}
+
+message CreateWorkflowRequest {
+  Workflow workflow = 1;
+}
+
+message CreateWorkflowResponse {
+  string workflow_id = 1;
+}
+
+message GetWorkflowRequest {
+  string workflow_id = 1;
+}
+
+message GetWorkflowResponse {
+  Workflow workflow = 1;
+}
+
+message ListWorkflowsRequest {}
+
+message ListWorkflowsResponse {
+  repeated WorkflowSummary workflows = 1;
+}
+
+message UpdateWorkflowRequest {
+  Workflow workflow = 1;
+}
+
+message UpdateWorkflowResponse {
+  bool updated = 1;
+}
+
+message DeleteWorkflowRequest {
+  string workflow_id = 1;
+}
+
+message DeleteWorkflowResponse {
+  bool deleted = 1;
+}
+
+message InvokeWorkflowRequest {
+  string execution_id = 1;
+  string workflow_name = 2;
+  string input_json = 3;
+  string zaru_user_token = 4;
+}
+
+message InvokeWorkflowResponse {
+  string result_json = 1;
+}
+
+message InvokeCliRequest {
+  string execution_id = 1;
+  string tool_name = 2;
+  string subcommand = 3;
+  repeated string args = 4;
+  string workspace_path = 5;
+}
+
+message InvokeCliResponse {
+  int32 exit_code = 1;
+  string stdout = 2;
+  string stderr = 3;
+}
+
+message ExploreApiRequest {
+  string execution_id = 1;
+  string api_spec_id = 2;
+  string operation_id = 3;
+  string parameters_json = 4;
+  repeated string fields = 5;
+  bool include_hateoas_hints = 6;
+}
+
+message ExploreApiResponse {
+  string sliced_data_json = 1;
+  string hints_json = 2;
+  string operation_metadata_json = 3;
+}
+
+message ListToolsRequest {}
+
+message ToolSummary {
+  string name = 1;
+  string description = 2;
+  string kind = 3;
+}
+
+message ListToolsResponse {
+  repeated ToolSummary tools = 1;
+}

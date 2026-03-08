@@ -3,6 +3,7 @@ use std::env;
 #[derive(Debug, Clone)]
 pub struct GatewayConfig {
     pub bind_addr: String,
+    pub grpc_bind_addr: String,
     pub database_url: String,
     pub jwt_secret: String,
     pub auth_disabled: bool,
@@ -13,6 +14,8 @@ impl GatewayConfig {
     pub fn from_env() -> Self {
         let bind_addr =
             env::var("SMCP_GATEWAY_BIND").unwrap_or_else(|_| "0.0.0.0:8089".to_string());
+        let grpc_bind_addr =
+            env::var("SMCP_GATEWAY_GRPC_BIND").unwrap_or_else(|_| "0.0.0.0:50055".to_string());
         let database_url =
             env::var("SMCP_GATEWAY_DB").unwrap_or_else(|_| "sqlite://gateway.db".to_string());
         let jwt_secret =
@@ -24,6 +27,7 @@ impl GatewayConfig {
             .unwrap_or(false);
         Self {
             bind_addr,
+            grpc_bind_addr,
             database_url,
             jwt_secret,
             auth_disabled,

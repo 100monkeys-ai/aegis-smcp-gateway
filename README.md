@@ -36,6 +36,7 @@ Standalone SMCP tooling gateway implementing ADR-053.
 Environment variables:
 
 - `SMCP_GATEWAY_BIND` (default: `0.0.0.0:8089`)
+- `SMCP_GATEWAY_GRPC_BIND` (default: `0.0.0.0:50055`)
 - `SMCP_GATEWAY_DB` (default: `sqlite://gateway.db`)
 - `SMCP_GATEWAY_JWT_SECRET` (default: `dev-secret`)
 - `SMCP_GATEWAY_SMCP_TOKEN_SECRET` (default: `smcp-dev-secret`)
@@ -46,3 +47,8 @@ Environment variables:
 ```bash
 cargo run
 ```
+
+The binary serves:
+
+- HTTP control/invocation API on `SMCP_GATEWAY_BIND`
+- gRPC `ToolWorkflowService` + `GatewayInvocationService` on `SMCP_GATEWAY_GRPC_BIND`
