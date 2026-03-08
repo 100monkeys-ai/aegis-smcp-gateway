@@ -56,7 +56,9 @@ impl InvocationService {
         let call = verify_and_extract(
             &envelope,
             &session.public_key_b64,
-            &self.config.smcp_token_secret,
+            &self.config.smcp_jwt_public_key_pem,
+            &self.config.smcp_jwt_issuer,
+            &self.config.smcp_jwt_audience,
         )?;
 
         if self
@@ -83,18 +85,23 @@ impl InvocationService {
                         .collect::<Vec<_>>()
                 })
                 .unwrap_or_default();
+            let fsal_volume_id = call
+                .arguments
+                .get("fsal_volume_id")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| {
+                    GatewayError::Validation("CLI invocation requires fsal_volume_id".to_string())
+                })?
+                .to_string();
 
             self.cli_engine
                 .invoke(CliInvocation {
                     execution_id: call.execution_id,
+                    security_context: session.security_context,
                     tool_name: call.tool_name,
                     command,
                     args,
-                    workspace_path: call
-                        .arguments
-                        .get("workspace_path")
-                        .and_then(|v| v.as_str())
-                        .map(ToString::to_string),
+                    fsal_volume_id,
                 })
                 .await
         } else {
@@ -133,17 +140,22 @@ impl InvocationService {
                         .collect::<Vec<_>>()
                 })
                 .unwrap_or_default();
+            let fsal_volume_id = args
+                .get("fsal_volume_id")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| {
+                    GatewayError::Validation("CLI invocation requires fsal_volume_id".to_string())
+                })?
+                .to_string();
 
             self.cli_engine
                 .invoke(CliInvocation {
                     execution_id: execution_id.to_string(),
+                    security_context: "internal".to_string(),
                     tool_name: tool_name.to_string(),
                     command,
                     args: cli_args,
-                    workspace_path: args
-                        .get("workspace_path")
-                        .and_then(|v| v.as_str())
-                        .map(ToString::to_string),
+                    fsal_volume_id,
                 })
                 .await
         } else {

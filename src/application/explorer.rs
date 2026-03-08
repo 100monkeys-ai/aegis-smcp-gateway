@@ -7,7 +7,7 @@ use crate::application::credential_resolver::CredentialResolver;
 use crate::domain::{ApiSpecId, ApiSpecRepository, GatewayEvent};
 use crate::infrastructure::errors::GatewayError;
 use crate::infrastructure::http_client::HttpClient;
-use crate::infrastructure::persistence::sqlite::SqliteStore;
+use crate::infrastructure::persistence::EventStore;
 
 #[derive(Debug, Deserialize)]
 pub struct ApiExplorerRequest {
@@ -31,7 +31,7 @@ pub struct ExplorerService {
     specs: Arc<dyn ApiSpecRepository>,
     http_client: HttpClient,
     credential_resolver: CredentialResolver,
-    store: SqliteStore,
+    event_store: Arc<dyn EventStore>,
 }
 
 impl ExplorerService {
@@ -39,13 +39,13 @@ impl ExplorerService {
         specs: Arc<dyn ApiSpecRepository>,
         http_client: HttpClient,
         credential_resolver: CredentialResolver,
-        store: SqliteStore,
+        event_store: Arc<dyn EventStore>,
     ) -> Self {
         Self {
             specs,
             http_client,
             credential_resolver,
-            store,
+            event_store,
         }
     }
 
@@ -87,7 +87,7 @@ impl ExplorerService {
         let sliced_data = Value::Object(sliced);
         let after = sliced_data.to_string().len();
 
-        self.store
+        self.event_store
             .append_event(
                 "ExplorerRequestExecuted",
                 &serde_json::to_value(GatewayEvent::ExplorerRequestExecuted {

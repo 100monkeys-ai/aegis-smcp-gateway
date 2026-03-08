@@ -29,7 +29,6 @@ Standalone SMCP tooling gateway implementing ADR-053.
 - `GET /v1/tools`
 - `POST /v1/explorer`
 - `POST /v1/invoke`
-- `POST /v1/invoke/internal`
 
 ## Configuration
 
@@ -38,9 +37,17 @@ Environment variables:
 - `SMCP_GATEWAY_BIND` (default: `0.0.0.0:8089`)
 - `SMCP_GATEWAY_GRPC_BIND` (default: `0.0.0.0:50055`)
 - `SMCP_GATEWAY_DB` (default: `sqlite://gateway.db`)
-- `SMCP_GATEWAY_JWT_SECRET` (default: `dev-secret`)
-- `SMCP_GATEWAY_SMCP_TOKEN_SECRET` (default: `smcp-dev-secret`)
+- `SMCP_GATEWAY_OPERATOR_JWT_PUBLIC_KEY_PEM` (required unless `SMCP_GATEWAY_AUTH_DISABLED=true`)
+- `SMCP_GATEWAY_OPERATOR_JWT_ISSUER` (default: `aegis-keycloak`)
+- `SMCP_GATEWAY_OPERATOR_JWT_AUDIENCE` (default: `aegis-smcp-gateway`)
+- `SMCP_GATEWAY_SMCP_JWT_PUBLIC_KEY_PEM` (required)
+- `SMCP_GATEWAY_SMCP_JWT_ISSUER` (default: `aegis-orchestrator`)
+- `SMCP_GATEWAY_SMCP_JWT_AUDIENCE` (default: `aegis-agents`)
 - `SMCP_GATEWAY_AUTH_DISABLED` (default: `false`)
+- `SMCP_GATEWAY_SEMANTIC_JUDGE_URL` (optional; required when invoking CLI tools with `require_semantic_judge=true`)
+- `SMCP_GATEWAY_NFS_HOST` (default: `127.0.0.1`)
+- `SMCP_GATEWAY_NFS_PORT` (default: `2049`)
+- `SMCP_GATEWAY_NFS_MOUNT_PORT` (default: `20048`)
 
 ## Run
 

@@ -29,8 +29,15 @@ impl CredentialResolver {
             }
             CredentialResolutionPath::HumanDelegated { target_service } => {
                 let token = zaru_user_token.ok_or(GatewayError::Unauthorized)?;
-                let header_name = format!("X-Delegated-{}-Token", target_service);
-                Ok(vec![(header_name, token.to_string())])
+                if target_service.trim().is_empty() {
+                    return Err(GatewayError::Validation(
+                        "human delegated target_service cannot be empty".to_string(),
+                    ));
+                }
+                Ok(vec![(
+                    "Authorization".to_string(),
+                    format!("Bearer {token}"),
+                )])
             }
             CredentialResolutionPath::StaticRef(reference) => {
                 let env_key = format!("OPENBAO_STATIC_{}", reference.key.to_ascii_uppercase());
@@ -44,7 +51,6 @@ impl CredentialResolver {
                     format!("Bearer {token}"),
                 )])
             }
-            CredentialResolutionPath::None => Ok(Vec::new()),
         }
     }
 }

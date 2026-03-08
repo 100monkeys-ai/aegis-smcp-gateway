@@ -12,7 +12,6 @@ use crate::infrastructure::config::GatewayConfig;
 
 #[derive(Debug, Clone, Deserialize)]
 struct JwtClaims {
-    exp: usize,
     aegis_role: Option<String>,
 }
 
@@ -36,18 +35,24 @@ pub async fn require_operator(
         .or_else(|| auth.strip_prefix("bearer "))
         .ok_or(StatusCode::UNAUTHORIZED)?;
 
-    let mut validation = Validation::new(Algorithm::HS256);
+    if config.operator_jwt_public_key_pem.trim().is_empty() {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+
+    let mut validation = Validation::new(Algorithm::RS256);
     validation.validate_exp = true;
+    validation.set_issuer(&[config.operator_jwt_issuer.as_str()]);
+    validation.set_audience(&[config.operator_jwt_audience.as_str()]);
 
     let claims = decode::<JwtClaims>(
         token,
-        &DecodingKey::from_secret(config.jwt_secret.as_bytes()),
+        &DecodingKey::from_rsa_pem(config.operator_jwt_public_key_pem.as_bytes())
+            .map_err(|_| StatusCode::UNAUTHORIZED)?,
         &validation,
     )
     .map_err(|_| StatusCode::UNAUTHORIZED)?
     .claims;
 
-    let _exp = claims.exp;
     let role = claims.aegis_role.unwrap_or_default();
     if role != "aegis:admin" && role != "aegis:operator" {
         return Err(StatusCode::FORBIDDEN);

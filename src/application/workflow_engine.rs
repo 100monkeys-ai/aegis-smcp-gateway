@@ -12,7 +12,7 @@ use crate::domain::{
 };
 use crate::infrastructure::errors::GatewayError;
 use crate::infrastructure::http_client::HttpClient;
-use crate::infrastructure::persistence::sqlite::SqliteStore;
+use crate::infrastructure::persistence::EventStore;
 
 #[derive(Clone)]
 pub struct WorkflowEngine {
@@ -20,7 +20,7 @@ pub struct WorkflowEngine {
     specs: Arc<dyn ApiSpecRepository>,
     http_client: HttpClient,
     credential_resolver: CredentialResolver,
-    store: SqliteStore,
+    event_store: Arc<dyn EventStore>,
 }
 
 impl WorkflowEngine {
@@ -29,14 +29,14 @@ impl WorkflowEngine {
         specs: Arc<dyn ApiSpecRepository>,
         http_client: HttpClient,
         credential_resolver: CredentialResolver,
-        store: SqliteStore,
+        event_store: Arc<dyn EventStore>,
     ) -> Self {
         Self {
             workflows,
             specs,
             http_client,
             credential_resolver,
-            store,
+            event_store,
         }
     }
 
@@ -64,7 +64,7 @@ impl WorkflowEngine {
         zaru_user_token: Option<&str>,
     ) -> Result<Value, GatewayError> {
         let started = Instant::now();
-        self.store
+        self.event_store
             .append_event(
                 "WorkflowInvocationStarted",
                 &serde_json::to_value(GatewayEvent::WorkflowInvocationStarted {
@@ -127,7 +127,7 @@ impl WorkflowEngine {
                         &mut state,
                     )?;
 
-                    self.store
+                    self.event_store
                         .append_event(
                             "WorkflowStepExecuted",
                             &serde_json::to_value(GatewayEvent::WorkflowStepExecuted {
@@ -165,7 +165,7 @@ impl WorkflowEngine {
                     };
 
                     if should_abort {
-                        self.store
+                        self.event_store
                             .append_event(
                                 "WorkflowInvocationFailed",
                                 &serde_json::to_value(GatewayEvent::WorkflowInvocationFailed {
@@ -183,7 +183,7 @@ impl WorkflowEngine {
             }
         }
 
-        self.store
+        self.event_store
             .append_event(
                 "WorkflowInvocationCompleted",
                 &serde_json::to_value(GatewayEvent::WorkflowInvocationCompleted {

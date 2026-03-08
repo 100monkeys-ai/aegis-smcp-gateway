@@ -5,9 +5,17 @@ pub struct GatewayConfig {
     pub bind_addr: String,
     pub grpc_bind_addr: String,
     pub database_url: String,
-    pub jwt_secret: String,
+    pub operator_jwt_public_key_pem: String,
+    pub operator_jwt_issuer: String,
+    pub operator_jwt_audience: String,
     pub auth_disabled: bool,
-    pub smcp_token_secret: String,
+    pub smcp_jwt_public_key_pem: String,
+    pub smcp_jwt_issuer: String,
+    pub smcp_jwt_audience: String,
+    pub semantic_judge_url: Option<String>,
+    pub nfs_server_host: String,
+    pub nfs_port: u16,
+    pub nfs_mount_port: u16,
 }
 
 impl GatewayConfig {
@@ -18,10 +26,31 @@ impl GatewayConfig {
             env::var("SMCP_GATEWAY_GRPC_BIND").unwrap_or_else(|_| "0.0.0.0:50055".to_string());
         let database_url =
             env::var("SMCP_GATEWAY_DB").unwrap_or_else(|_| "sqlite://gateway.db".to_string());
-        let jwt_secret =
-            env::var("SMCP_GATEWAY_JWT_SECRET").unwrap_or_else(|_| "dev-secret".to_string());
-        let smcp_token_secret = env::var("SMCP_GATEWAY_SMCP_TOKEN_SECRET")
-            .unwrap_or_else(|_| "smcp-dev-secret".to_string());
+        let operator_jwt_public_key_pem = env::var("SMCP_GATEWAY_OPERATOR_JWT_PUBLIC_KEY_PEM")
+            .unwrap_or_else(|_| String::new());
+        let operator_jwt_issuer = env::var("SMCP_GATEWAY_OPERATOR_JWT_ISSUER")
+            .unwrap_or_else(|_| "aegis-keycloak".to_string());
+        let operator_jwt_audience = env::var("SMCP_GATEWAY_OPERATOR_JWT_AUDIENCE")
+            .unwrap_or_else(|_| "aegis-smcp-gateway".to_string());
+        let smcp_jwt_public_key_pem =
+            env::var("SMCP_GATEWAY_SMCP_JWT_PUBLIC_KEY_PEM").unwrap_or_else(|_| String::new());
+        let smcp_jwt_issuer = env::var("SMCP_GATEWAY_SMCP_JWT_ISSUER")
+            .unwrap_or_else(|_| "aegis-orchestrator".to_string());
+        let smcp_jwt_audience = env::var("SMCP_GATEWAY_SMCP_JWT_AUDIENCE")
+            .unwrap_or_else(|_| "aegis-agents".to_string());
+        let semantic_judge_url = env::var("SMCP_GATEWAY_SEMANTIC_JUDGE_URL")
+            .ok()
+            .filter(|value| !value.trim().is_empty());
+        let nfs_server_host =
+            env::var("SMCP_GATEWAY_NFS_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
+        let nfs_port = env::var("SMCP_GATEWAY_NFS_PORT")
+            .ok()
+            .and_then(|value| value.parse::<u16>().ok())
+            .unwrap_or(2049);
+        let nfs_mount_port = env::var("SMCP_GATEWAY_NFS_MOUNT_PORT")
+            .ok()
+            .and_then(|value| value.parse::<u16>().ok())
+            .unwrap_or(20048);
         let auth_disabled = env::var("SMCP_GATEWAY_AUTH_DISABLED")
             .map(|v| v.eq_ignore_ascii_case("true"))
             .unwrap_or(false);
@@ -29,9 +58,17 @@ impl GatewayConfig {
             bind_addr,
             grpc_bind_addr,
             database_url,
-            jwt_secret,
+            operator_jwt_public_key_pem,
+            operator_jwt_issuer,
+            operator_jwt_audience,
             auth_disabled,
-            smcp_token_secret,
+            smcp_jwt_public_key_pem,
+            smcp_jwt_issuer,
+            smcp_jwt_audience,
+            semantic_judge_url,
+            nfs_server_host,
+            nfs_port,
+            nfs_mount_port,
         }
     }
 }

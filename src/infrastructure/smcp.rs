@@ -10,7 +10,6 @@ use crate::infrastructure::errors::GatewayError;
 #[derive(Debug, Clone, Deserialize)]
 struct SmcpClaims {
     execution_id: String,
-    exp: usize,
 }
 
 pub struct SmcpVerifiedCall {
@@ -22,7 +21,9 @@ pub struct SmcpVerifiedCall {
 pub fn verify_and_extract(
     envelope: &SmcpEnvelope,
     public_key_b64: &str,
-    token_secret: &str,
+    smcp_jwt_public_key_pem: &str,
+    smcp_jwt_issuer: &str,
+    smcp_jwt_audience: &str,
 ) -> Result<SmcpVerifiedCall, GatewayError> {
     let pk_bytes = base64::engine::general_purpose::STANDARD
         .decode(public_key_b64)
@@ -44,17 +45,24 @@ pub fn verify_and_extract(
     key.verify(&envelope.inner_mcp, &sig)
         .map_err(|e| GatewayError::Smcp(format!("signature verify failed: {e}")))?;
 
-    let mut validation = Validation::new(Algorithm::HS256);
+    if smcp_jwt_public_key_pem.trim().is_empty() {
+        return Err(GatewayError::Smcp(
+            "SMCP JWT public key is not configured".to_string(),
+        ));
+    }
+
+    let mut validation = Validation::new(Algorithm::RS256);
     validation.validate_exp = true;
+    validation.set_issuer(&[smcp_jwt_issuer]);
+    validation.set_audience(&[smcp_jwt_audience]);
     let claims = decode::<SmcpClaims>(
         &envelope.security_token,
-        &DecodingKey::from_secret(token_secret.as_bytes()),
+        &DecodingKey::from_rsa_pem(smcp_jwt_public_key_pem.as_bytes())
+            .map_err(|e| GatewayError::Smcp(format!("invalid SMCP JWT public key: {e}")))?,
         &validation,
     )
     .map_err(|e| GatewayError::Smcp(format!("security token invalid: {e}")))?
     .claims;
-
-    let _exp = claims.exp;
 
     let tool_call: MpcToolCall = serde_json::from_slice(&envelope.inner_mcp)
         .map_err(|e| GatewayError::Smcp(format!("invalid inner MCP payload: {e}")))?;

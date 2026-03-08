@@ -12,29 +12,28 @@ use crate::infrastructure::errors::GatewayError;
 use crate::infrastructure::persistence::EventStore;
 
 #[derive(Clone)]
-pub struct SqliteStore {
-    pool: sqlx::SqlitePool,
+pub struct PostgresStore {
+    pool: sqlx::PgPool,
 }
 
-impl SqliteStore {
+impl PostgresStore {
     pub async fn new(database_url: &str) -> Result<Self, GatewayError> {
-        let pool = sqlx::SqlitePool::connect(database_url).await?;
-        sqlx::query(include_str!("schema.sql"))
+        let pool = sqlx::PgPool::connect(database_url).await?;
+        sqlx::query(include_str!("schema_postgres.sql"))
             .execute(&pool)
             .await?;
         Ok(Self { pool })
     }
-
 }
 
 #[async_trait]
-impl EventStore for SqliteStore {
+impl EventStore for PostgresStore {
     async fn append_event(
         &self,
         event_type: &str,
         payload: &serde_json::Value,
     ) -> Result<(), GatewayError> {
-        sqlx::query("INSERT INTO gateway_events(event_type, payload, created_at) VALUES (?, ?, ?)")
+        sqlx::query("INSERT INTO gateway_events(event_type, payload, created_at) VALUES ($1, $2, $3)")
             .bind(event_type)
             .bind(payload.to_string())
             .bind(Utc::now().to_rfc3339())
@@ -45,12 +44,20 @@ impl EventStore for SqliteStore {
 }
 
 #[async_trait]
-impl ApiSpecRepository for SqliteStore {
+impl ApiSpecRepository for PostgresStore {
     async fn save(&self, spec: ApiSpec) -> Result<(), GatewayError> {
         sqlx::query(
-            r#"INSERT OR REPLACE INTO api_specs
+            r#"INSERT INTO api_specs
             (id, name, base_url, source_url, raw_spec, operations, credential_path, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)"#,
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            ON CONFLICT (id) DO UPDATE SET
+              name = EXCLUDED.name,
+              base_url = EXCLUDED.base_url,
+              source_url = EXCLUDED.source_url,
+              raw_spec = EXCLUDED.raw_spec,
+              operations = EXCLUDED.operations,
+              credential_path = EXCLUDED.credential_path,
+              created_at = EXCLUDED.created_at"#,
         )
         .bind(spec.id.0.to_string())
         .bind(spec.name)
@@ -67,23 +74,21 @@ impl ApiSpecRepository for SqliteStore {
 
     async fn find_by_id(&self, id: ApiSpecId) -> Result<Option<ApiSpec>, GatewayError> {
         let row = sqlx::query(
-            "SELECT id,name,base_url,source_url,raw_spec,operations,credential_path,created_at FROM api_specs WHERE id=?",
+            "SELECT id,name,base_url,source_url,raw_spec,operations,credential_path,created_at FROM api_specs WHERE id=$1",
         )
         .bind(id.0.to_string())
         .fetch_optional(&self.pool)
         .await?;
-
         row.map(api_spec_from_row).transpose()
     }
 
     async fn find_by_source_url(&self, url: &str) -> Result<Option<ApiSpec>, GatewayError> {
         let row = sqlx::query(
-            "SELECT id,name,base_url,source_url,raw_spec,operations,credential_path,created_at FROM api_specs WHERE source_url=?",
+            "SELECT id,name,base_url,source_url,raw_spec,operations,credential_path,created_at FROM api_specs WHERE source_url=$1",
         )
         .bind(url)
         .fetch_optional(&self.pool)
         .await?;
-
         row.map(api_spec_from_row).transpose()
     }
 
@@ -106,7 +111,7 @@ impl ApiSpecRepository for SqliteStore {
     }
 
     async fn delete(&self, id: ApiSpecId) -> Result<(), GatewayError> {
-        sqlx::query("DELETE FROM api_specs WHERE id=?")
+        sqlx::query("DELETE FROM api_specs WHERE id=$1")
             .bind(id.0.to_string())
             .execute(&self.pool)
             .await?;
@@ -114,7 +119,7 @@ impl ApiSpecRepository for SqliteStore {
     }
 }
 
-fn api_spec_from_row(row: sqlx::sqlite::SqliteRow) -> Result<ApiSpec, GatewayError> {
+fn api_spec_from_row(row: sqlx::postgres::PgRow) -> Result<ApiSpec, GatewayError> {
     let id_raw: String = row.try_get("id")?;
     let raw_spec_str: String = row.try_get("raw_spec")?;
     let operations_str: String = row.try_get("operations")?;
@@ -138,12 +143,19 @@ fn api_spec_from_row(row: sqlx::sqlite::SqliteRow) -> Result<ApiSpec, GatewayErr
 }
 
 #[async_trait]
-impl ToolWorkflowRepository for SqliteStore {
+impl ToolWorkflowRepository for PostgresStore {
     async fn save(&self, workflow: ToolWorkflow) -> Result<(), GatewayError> {
         sqlx::query(
-            r#"INSERT OR REPLACE INTO workflows
+            r#"INSERT INTO workflows
             (id, name, description, input_schema, api_spec_id, steps, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)"#,
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            ON CONFLICT (id) DO UPDATE SET
+              name = EXCLUDED.name,
+              description = EXCLUDED.description,
+              input_schema = EXCLUDED.input_schema,
+              api_spec_id = EXCLUDED.api_spec_id,
+              steps = EXCLUDED.steps,
+              created_at = EXCLUDED.created_at"#,
         )
         .bind(workflow.id.0.to_string())
         .bind(workflow.name)
@@ -159,7 +171,7 @@ impl ToolWorkflowRepository for SqliteStore {
 
     async fn find_by_id(&self, id: WorkflowId) -> Result<Option<ToolWorkflow>, GatewayError> {
         let row = sqlx::query(
-            "SELECT id,name,description,input_schema,api_spec_id,steps,created_at FROM workflows WHERE id=?",
+            "SELECT id,name,description,input_schema,api_spec_id,steps,created_at FROM workflows WHERE id=$1",
         )
         .bind(id.0.to_string())
         .fetch_optional(&self.pool)
@@ -169,7 +181,7 @@ impl ToolWorkflowRepository for SqliteStore {
 
     async fn find_by_name(&self, name: &str) -> Result<Option<ToolWorkflow>, GatewayError> {
         let row = sqlx::query(
-            "SELECT id,name,description,input_schema,api_spec_id,steps,created_at FROM workflows WHERE name=?",
+            "SELECT id,name,description,input_schema,api_spec_id,steps,created_at FROM workflows WHERE name=$1",
         )
         .bind(name)
         .fetch_optional(&self.pool)
@@ -196,7 +208,7 @@ impl ToolWorkflowRepository for SqliteStore {
     }
 
     async fn delete(&self, id: WorkflowId) -> Result<(), GatewayError> {
-        sqlx::query("DELETE FROM workflows WHERE id=?")
+        sqlx::query("DELETE FROM workflows WHERE id=$1")
             .bind(id.0.to_string())
             .execute(&self.pool)
             .await?;
@@ -204,7 +216,7 @@ impl ToolWorkflowRepository for SqliteStore {
     }
 }
 
-fn workflow_from_row(row: sqlx::sqlite::SqliteRow) -> Result<ToolWorkflow, GatewayError> {
+fn workflow_from_row(row: sqlx::postgres::PgRow) -> Result<ToolWorkflow, GatewayError> {
     let id_raw: String = row.try_get("id")?;
     let api_spec_id_raw: String = row.try_get("api_spec_id")?;
     let input_schema_str: String = row.try_get("input_schema")?;
@@ -230,21 +242,32 @@ fn workflow_from_row(row: sqlx::sqlite::SqliteRow) -> Result<ToolWorkflow, Gatew
 }
 
 #[async_trait]
-impl EphemeralCliToolRepository for SqliteStore {
+impl EphemeralCliToolRepository for PostgresStore {
     async fn save(&self, tool: EphemeralCliTool) -> Result<(), GatewayError> {
         tool.validate()?;
         sqlx::query(
-            r#"INSERT OR REPLACE INTO cli_tools
+            r#"INSERT INTO cli_tools
             (name, description, docker_image, allowed_subcommands, require_semantic_judge, default_timeout_seconds, registry_credentials_ref)
-            VALUES (?, ?, ?, ?, ?, ?, ?)"#,
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            ON CONFLICT (name) DO UPDATE SET
+              description = EXCLUDED.description,
+              docker_image = EXCLUDED.docker_image,
+              allowed_subcommands = EXCLUDED.allowed_subcommands,
+              require_semantic_judge = EXCLUDED.require_semantic_judge,
+              default_timeout_seconds = EXCLUDED.default_timeout_seconds,
+              registry_credentials_ref = EXCLUDED.registry_credentials_ref"#,
         )
         .bind(tool.name)
         .bind(tool.description)
         .bind(tool.docker_image)
         .bind(serde_json::to_string(&tool.allowed_subcommands)?)
-        .bind(i64::from(tool.require_semantic_judge))
+        .bind(tool.require_semantic_judge)
         .bind(i64::from(tool.default_timeout_seconds))
-        .bind(tool.registry_credentials_ref.map(|v| serde_json::to_string(&v)).transpose()?)
+        .bind(
+            tool.registry_credentials_ref
+                .map(|value| serde_json::to_string(&value))
+                .transpose()?,
+        )
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -252,12 +275,11 @@ impl EphemeralCliToolRepository for SqliteStore {
 
     async fn find_by_name(&self, name: &str) -> Result<Option<EphemeralCliTool>, GatewayError> {
         let row = sqlx::query(
-            "SELECT name,description,docker_image,allowed_subcommands,require_semantic_judge,default_timeout_seconds,registry_credentials_ref FROM cli_tools WHERE name=?",
+            "SELECT name,description,docker_image,allowed_subcommands,require_semantic_judge,default_timeout_seconds,registry_credentials_ref FROM cli_tools WHERE name=$1",
         )
         .bind(name)
         .fetch_optional(&self.pool)
         .await?;
-
         row.map(cli_tool_from_row).transpose()
     }
 
@@ -282,7 +304,7 @@ impl EphemeralCliToolRepository for SqliteStore {
     }
 
     async fn delete(&self, name: &str) -> Result<(), GatewayError> {
-        sqlx::query("DELETE FROM cli_tools WHERE name=?")
+        sqlx::query("DELETE FROM cli_tools WHERE name=$1")
             .bind(name)
             .execute(&self.pool)
             .await?;
@@ -290,7 +312,7 @@ impl EphemeralCliToolRepository for SqliteStore {
     }
 }
 
-fn cli_tool_from_row(row: sqlx::sqlite::SqliteRow) -> Result<EphemeralCliTool, GatewayError> {
+fn cli_tool_from_row(row: sqlx::postgres::PgRow) -> Result<EphemeralCliTool, GatewayError> {
     let registry_ref: Option<String> = row.try_get("registry_credentials_ref")?;
     Ok(EphemeralCliTool {
         name: row.try_get("name")?,
@@ -299,17 +321,23 @@ fn cli_tool_from_row(row: sqlx::sqlite::SqliteRow) -> Result<EphemeralCliTool, G
         allowed_subcommands: serde_json::from_str(
             &row.try_get::<String, _>("allowed_subcommands")?,
         )?,
-        require_semantic_judge: row.try_get::<i64, _>("require_semantic_judge")? != 0,
+        require_semantic_judge: row.try_get("require_semantic_judge")?,
         default_timeout_seconds: row.try_get::<i64, _>("default_timeout_seconds")? as u32,
-        registry_credentials_ref: registry_ref.map(|v| serde_json::from_str(&v)).transpose()?,
+        registry_credentials_ref: registry_ref.map(|value| serde_json::from_str(&value)).transpose()?,
     })
 }
 
 #[async_trait]
-impl SmcpSessionRepository for SqliteStore {
+impl SmcpSessionRepository for PostgresStore {
     async fn save(&self, session: SmcpSessionRecord) -> Result<(), GatewayError> {
         sqlx::query(
-            "INSERT OR REPLACE INTO smcp_sessions(execution_id, agent_id, security_context, public_key_b64, security_token) VALUES (?, ?, ?, ?, ?)",
+            r#"INSERT INTO smcp_sessions(execution_id, agent_id, security_context, public_key_b64, security_token)
+               VALUES ($1, $2, $3, $4, $5)
+               ON CONFLICT (execution_id) DO UPDATE SET
+                 agent_id = EXCLUDED.agent_id,
+                 security_context = EXCLUDED.security_context,
+                 public_key_b64 = EXCLUDED.public_key_b64,
+                 security_token = EXCLUDED.security_token"#,
         )
         .bind(session.execution_id)
         .bind(session.agent_id)
@@ -326,19 +354,19 @@ impl SmcpSessionRepository for SqliteStore {
         execution_id: &str,
     ) -> Result<Option<SmcpSessionRecord>, GatewayError> {
         let row = sqlx::query(
-            "SELECT execution_id,agent_id,security_context,public_key_b64,security_token FROM smcp_sessions WHERE execution_id=?",
+            "SELECT execution_id,agent_id,security_context,public_key_b64,security_token FROM smcp_sessions WHERE execution_id=$1",
         )
         .bind(execution_id)
         .fetch_optional(&self.pool)
         .await?;
 
-        row.map(|r| {
+        row.map(|record| {
             Ok(SmcpSessionRecord {
-                execution_id: r.try_get("execution_id")?,
-                agent_id: r.try_get("agent_id")?,
-                security_context: r.try_get("security_context")?,
-                public_key_b64: r.try_get("public_key_b64")?,
-                security_token: r.try_get("security_token")?,
+                execution_id: record.try_get("execution_id")?,
+                agent_id: record.try_get("agent_id")?,
+                security_context: record.try_get("security_context")?,
+                public_key_b64: record.try_get("public_key_b64")?,
+                security_token: record.try_get("security_token")?,
             })
         })
         .transpose()

@@ -8,34 +8,43 @@ use tokio::process::Command;
 
 use crate::application::semantic_gate::{SemanticDecision, SemanticGate};
 use crate::domain::{EphemeralCliToolRepository, GatewayEvent};
+use crate::infrastructure::config::GatewayConfig;
 use crate::infrastructure::errors::GatewayError;
-use crate::infrastructure::persistence::sqlite::SqliteStore;
+use crate::infrastructure::persistence::EventStore;
 
 #[derive(Clone)]
 pub struct CliEngine {
     cli_tools: Arc<dyn EphemeralCliToolRepository>,
     semantic_gate: SemanticGate,
-    store: SqliteStore,
+    event_store: Arc<dyn EventStore>,
+    nfs_server_host: String,
+    nfs_port: u16,
+    nfs_mount_port: u16,
 }
 
 pub struct CliInvocation {
     pub execution_id: String,
+    pub security_context: String,
     pub tool_name: String,
     pub command: String,
     pub args: Vec<String>,
-    pub workspace_path: Option<String>,
+    pub fsal_volume_id: String,
 }
 
 impl CliEngine {
     pub fn new(
         cli_tools: Arc<dyn EphemeralCliToolRepository>,
         semantic_gate: SemanticGate,
-        store: SqliteStore,
+        event_store: Arc<dyn EventStore>,
+        config: GatewayConfig,
     ) -> Self {
         Self {
             cli_tools,
             semantic_gate,
-            store,
+            event_store,
+            nfs_server_host: config.nfs_server_host,
+            nfs_port: config.nfs_port,
+            nfs_mount_port: config.nfs_mount_port,
         }
     }
 
@@ -51,10 +60,16 @@ impl CliEngine {
 
         match self
             .semantic_gate
-            .evaluate(&tool, &invocation.command, &invocation.args)
+            .evaluate(
+                &tool,
+                &invocation.command,
+                &invocation.args,
+                &invocation.security_context,
+            )
+            .await?
         {
             SemanticDecision::Rejected(reason) => {
-                self.store
+                self.event_store
                     .append_event(
                         "CliToolSemanticRejected",
                         &serde_json::to_value(GatewayEvent::CliToolSemanticRejected {
@@ -62,7 +77,7 @@ impl CliEngine {
                             tool_name: tool.name,
                             requested_subcommand: invocation.command,
                             rejection_reason: reason.clone(),
-                            security_context: "unknown".to_string(),
+                            security_context: invocation.security_context,
                             rejected_at: chrono::Utc::now(),
                         })?,
                     )
@@ -72,7 +87,7 @@ impl CliEngine {
             SemanticDecision::Allowed => {}
         }
 
-        self.store
+        self.event_store
             .append_event(
                 "CliToolInvocationStarted",
                 &serde_json::to_value(GatewayEvent::CliToolInvocationStarted {
@@ -92,15 +107,28 @@ impl CliEngine {
             .arg("--network")
             .arg("none")
             .arg("--read-only")
+            .arg("--security-opt")
+            .arg("no-new-privileges")
             .arg("--cap-drop")
             .arg("ALL");
-
-        if let Some(workspace) = invocation.workspace_path {
-            cmd.arg("-v")
-                .arg(format!("{workspace}:/workspace"))
-                .arg("-w")
-                .arg("/workspace");
-        }
+        let volume_source = sanitize_volume_name(
+            &format!(
+                "aegis-cli-{}-{}",
+                invocation.execution_id, invocation.fsal_volume_id
+            ),
+            "aegis-cli-workspace",
+        );
+        cmd.arg("--mount")
+            .arg(format!(
+                "type=volume,src={volume_source},dst=/workspace,volume-driver=local,volume-opt=type=nfs,volume-opt=o=addr={},nfsvers=3,proto=tcp,port={},mountport={},soft,timeo=10,nolock,volume-opt=device=:/{}/{}",
+                self.nfs_server_host,
+                self.nfs_port,
+                self.nfs_mount_port,
+                invocation.execution_id,
+                invocation.fsal_volume_id
+            ))
+            .arg("-w")
+            .arg("/workspace");
 
         cmd.arg(&tool.docker_image)
             .arg(&invocation.command)
@@ -141,7 +169,7 @@ impl CliEngine {
             .map_err(|e| GatewayError::Internal(format!("failed to wait process: {e}")))?;
         let code = status.code().unwrap_or(-1);
 
-        self.store
+        self.event_store
             .append_event(
                 "CliToolInvocationCompleted",
                 &serde_json::to_value(GatewayEvent::CliToolInvocationCompleted {
@@ -162,4 +190,21 @@ impl CliEngine {
             "stderr": String::from_utf8_lossy(&stderr).to_string()
         }))
     }
+}
+
+fn sanitize_volume_name(candidate: &str, fallback: &str) -> String {
+    let mut value = candidate
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' || ch == '.' {
+                ch
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>();
+    if value.is_empty() {
+        value = fallback.to_string();
+    }
+    value
 }

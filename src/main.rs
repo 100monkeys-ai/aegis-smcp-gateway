@@ -22,7 +22,9 @@ use domain::{
 use infrastructure::auth::require_operator;
 use infrastructure::config::GatewayConfig;
 use infrastructure::http_client::HttpClient;
+use infrastructure::persistence::postgres::PostgresStore;
 use infrastructure::persistence::sqlite::SqliteStore;
+use infrastructure::persistence::EventStore;
 use presentation::control_plane::*;
 use presentation::grpc::proto::gateway_invocation_service_server::GatewayInvocationServiceServer;
 use presentation::grpc::proto::tool_workflow_service_server::ToolWorkflowServiceServer;
@@ -37,11 +39,36 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let config = GatewayConfig::from_env();
-    let store = SqliteStore::new(&config.database_url).await?;
+    let (specs, workflows, cli_tools, smcp_sessions, event_store): (
+        Arc<dyn ApiSpecRepository>,
+        Arc<dyn ToolWorkflowRepository>,
+        Arc<dyn EphemeralCliToolRepository>,
+        Arc<dyn SmcpSessionRepository>,
+        Arc<dyn EventStore>,
+    ) = if config.database_url.starts_with("postgres://")
+        || config.database_url.starts_with("postgresql://")
+    {
+        let store = PostgresStore::new(&config.database_url).await?;
+        (
+            Arc::new(store.clone()),
+            Arc::new(store.clone()),
+            Arc::new(store.clone()),
+            Arc::new(store.clone()),
+            Arc::new(store),
+        )
+    } else {
+        let store = SqliteStore::new(&config.database_url).await?;
+        (
+            Arc::new(store.clone()),
+            Arc::new(store.clone()),
+            Arc::new(store.clone()),
+            Arc::new(store.clone()),
+            Arc::new(store),
+        )
+    };
 
     if std::env::var("SMCP_GATEWAY_BOOTSTRAP_SESSION").is_ok() {
-        let session_repo: Arc<dyn SmcpSessionRepository> = Arc::new(store.clone());
-        session_repo
+        smcp_sessions
             .save(SmcpSessionRecord {
                 execution_id: "dev-execution".to_string(),
                 agent_id: "dev-agent".to_string(),
@@ -52,34 +79,34 @@ async fn main() -> anyhow::Result<()> {
             .await?;
     }
 
-    let specs: Arc<dyn ApiSpecRepository> = Arc::new(store.clone());
-    let workflows: Arc<dyn ToolWorkflowRepository> = Arc::new(store.clone());
-    let cli_tools: Arc<dyn EphemeralCliToolRepository> = Arc::new(store.clone());
-    let smcp_sessions: Arc<dyn SmcpSessionRepository> = Arc::new(store.clone());
-
     let http_client = HttpClient::new()?;
     let credential_resolver = CredentialResolver::new();
-    let semantic_gate = SemanticGate::new();
+    let semantic_gate = SemanticGate::new(config.semantic_judge_url.clone());
 
     let workflow_engine = WorkflowEngine::new(
         workflows.clone(),
         specs.clone(),
         http_client.clone(),
         credential_resolver.clone(),
-        store.clone(),
+        event_store.clone(),
     );
-    let cli_engine = CliEngine::new(cli_tools.clone(), semantic_gate, store.clone());
+    let cli_engine = CliEngine::new(
+        cli_tools.clone(),
+        semantic_gate,
+        event_store.clone(),
+        config.clone(),
+    );
     let explorer = ExplorerService::new(
         specs.clone(),
         http_client,
         credential_resolver,
-        store.clone(),
+        event_store.clone(),
     );
     let invocation = InvocationService::new(
         workflow_engine,
         cli_engine,
         cli_tools.clone(),
-        smcp_sessions,
+        smcp_sessions.clone(),
         config.clone(),
     );
 
@@ -87,8 +114,8 @@ async fn main() -> anyhow::Result<()> {
         specs,
         workflows,
         cli_tools,
-        smcp_sessions: Arc::new(store.clone()),
-        audit_store: store.clone(),
+        smcp_sessions: smcp_sessions.clone(),
+        audit_store: event_store,
         invocation_service: invocation,
         explorer_service: explorer,
     };
@@ -116,7 +143,6 @@ async fn main() -> anyhow::Result<()> {
     let app = Router::new()
         .merge(operator_routes)
         .route("/v1/invoke", post(invoke_smcp))
-        .route("/v1/invoke/internal", post(invoke_internal))
         .route("/health", get(|| async { "ok" }))
         .with_state(state.clone());
 
@@ -173,6 +199,26 @@ async fn update_workflow(
         req.steps,
     )
     .map_err(error_response)?;
+    let spec = state
+        .specs
+        .find_by_id(api_spec_id)
+        .await
+        .map_err(error_response)?
+        .ok_or_else(|| {
+            error_response(crate::infrastructure::errors::GatewayError::Validation(
+                "api_spec_id does not reference a registered ApiSpec".to_string(),
+            ))
+        })?;
+    for step in &workflow.steps {
+        if !spec.operations.contains_key(&step.operation_id) {
+            return Err(error_response(
+                crate::infrastructure::errors::GatewayError::Validation(format!(
+                    "workflow step '{}' references unknown operation_id '{}'",
+                    step.name, step.operation_id
+                )),
+            ));
+        }
+    }
     workflow.id = workflow_id;
 
     state

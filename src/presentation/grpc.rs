@@ -40,6 +40,9 @@ impl proto::tool_workflow_service_server::ToolWorkflowService for GatewayGrpcSer
             .map_err(invalid)?;
         let schema: Value = serde_json::from_str(&workflow.input_schema_json)
             .map_err(|e| Status::invalid_argument(format!("invalid input_schema_json: {e}")))?;
+        ensure_operations_exist(&self.state, api_spec_id, &steps)
+            .await
+            .map_err(invalid)?;
 
         let wf = ToolWorkflow::new(
             workflow.name,
@@ -115,6 +118,9 @@ impl proto::tool_workflow_service_server::ToolWorkflowService for GatewayGrpcSer
             .map_err(invalid)?;
         let schema: Value = serde_json::from_str(&workflow.input_schema_json)
             .map_err(|e| Status::invalid_argument(format!("invalid input_schema_json: {e}")))?;
+        ensure_operations_exist(&self.state, api_spec_id, &steps)
+            .await
+            .map_err(invalid)?;
 
         let mut wf = ToolWorkflow::new(
             workflow.name,
@@ -189,7 +195,7 @@ impl proto::gateway_invocation_service_server::GatewayInvocationService for Gate
         let args = serde_json::json!({
             "subcommand": req.subcommand,
             "args": req.args,
-            "workspace_path": req.workspace_path,
+            "fsal_volume_id": req.fsal_volume_id,
         });
 
         let result = self
@@ -355,6 +361,29 @@ fn parse_uuid_wrapped(
     input: &str,
 ) -> Result<crate::domain::ApiSpecId, crate::infrastructure::errors::GatewayError> {
     Ok(crate::domain::ApiSpecId(parse_uuid(input)?))
+}
+
+async fn ensure_operations_exist(
+    state: &AppState,
+    api_spec_id: crate::domain::ApiSpecId,
+    steps: &[WorkflowStep],
+) -> Result<(), crate::infrastructure::errors::GatewayError> {
+    let spec = state.specs.find_by_id(api_spec_id).await?.ok_or_else(|| {
+        crate::infrastructure::errors::GatewayError::Validation(
+            "api_spec_id does not reference a registered ApiSpec".to_string(),
+        )
+    })?;
+    for step in steps {
+        if !spec.operations.contains_key(&step.operation_id) {
+            return Err(crate::infrastructure::errors::GatewayError::Validation(
+                format!(
+                    "workflow step '{}' references unknown operation_id '{}'",
+                    step.name, step.operation_id
+                ),
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn invalid(err: crate::infrastructure::errors::GatewayError) -> Status {

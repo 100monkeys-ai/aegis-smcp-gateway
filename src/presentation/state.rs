@@ -4,7 +4,7 @@ use crate::application::{ExplorerService, InvocationService};
 use crate::domain::{
     ApiSpecRepository, EphemeralCliToolRepository, SmcpSessionRepository, ToolWorkflowRepository,
 };
-use crate::infrastructure::persistence::sqlite::SqliteStore;
+use crate::infrastructure::persistence::EventStore;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -12,7 +12,7 @@ pub struct AppState {
     pub workflows: Arc<dyn ToolWorkflowRepository>,
     pub cli_tools: Arc<dyn EphemeralCliToolRepository>,
     pub smcp_sessions: Arc<dyn SmcpSessionRepository>,
-    pub audit_store: SqliteStore,
+    pub audit_store: Arc<dyn EventStore>,
     pub invocation_service: InvocationService,
     pub explorer_service: ExplorerService,
 }

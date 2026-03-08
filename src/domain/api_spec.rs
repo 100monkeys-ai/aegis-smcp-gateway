@@ -95,5 +95,4 @@ pub enum CredentialResolutionPath {
     SystemJit { role: String },
     HumanDelegated { target_service: String },
     StaticRef(CredentialRef),
-    None,
 }

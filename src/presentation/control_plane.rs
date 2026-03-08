@@ -19,7 +19,7 @@ pub struct RegisterSpecRequest {
     pub source_url: Option<String>,
     pub inline_json: Option<Value>,
     pub source_fetch_url: Option<String>,
-    pub credential_path: Option<CredentialResolutionPath>,
+    pub credential_path: CredentialResolutionPath,
 }
 
 pub async fn register_spec(
@@ -62,8 +62,7 @@ pub async fn register_spec(
         req.source_url,
         raw_spec,
         operations,
-        req.credential_path
-            .unwrap_or(CredentialResolutionPath::None),
+        req.credential_path,
     )
     .map_err(error_response)?;
 
@@ -136,6 +135,7 @@ pub async fn register_workflow(
     Json(req): Json<RegisterWorkflowRequest>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let api_spec_id = parse_api_spec_id(&req.api_spec_id).map_err(error_response)?;
+    validate_workflow_steps_against_spec(&state, api_spec_id, &req.steps).await?;
     let workflow = ToolWorkflow::new(
         req.name,
         req.description,
@@ -277,37 +277,16 @@ pub async fn list_tools(
     let workflows = state.workflows.list_all().await.map_err(error_response)?;
     let cli_tools = state.cli_tools.list_all().await.map_err(error_response)?;
 
-    let mut workflow_tools = Vec::new();
-    for wf in workflows {
-        let full = state
-            .workflows
-            .find_by_name(&wf.name)
-            .await
-            .map_err(error_response)?;
-        if let Some(workflow) = full {
-            workflow_tools.push(json!({
-                "name": workflow.name,
-                "description": workflow.description,
-                "kind": "workflow",
-                "input_schema": workflow.input_schema
-            }));
-        }
-    }
-
+    let workflow_tools = workflows.into_iter().map(|workflow| {
+        json!({
+            "name": workflow.name,
+            "description": workflow.description
+        })
+    });
     let cli_tools = cli_tools.into_iter().map(|tool| {
         json!({
             "name": tool.name,
-            "description": tool.description,
-            "kind": "cli",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "subcommand": { "type": "string" },
-                    "args": { "type": "array", "items": { "type": "string" } },
-                    "workspace_path": { "type": "string" }
-                },
-                "required": ["subcommand"]
-            }
+            "description": tool.description
         })
     });
 
@@ -343,6 +322,34 @@ pub async fn upsert_smcp_session(
         .await
         .map_err(error_response)?;
     Ok(Json(json!({"saved": true})))
+}
+
+async fn validate_workflow_steps_against_spec(
+    state: &AppState,
+    api_spec_id: ApiSpecId,
+    steps: &[crate::domain::WorkflowStep],
+) -> Result<(), (StatusCode, Json<Value>)> {
+    let spec = state
+        .specs
+        .find_by_id(api_spec_id)
+        .await
+        .map_err(error_response)?
+        .ok_or_else(|| {
+            error_response(GatewayError::Validation(
+                "api_spec_id does not reference a registered ApiSpec".to_string(),
+            ))
+        })?;
+
+    for step in steps {
+        if !spec.operations.contains_key(&step.operation_id) {
+            return Err(error_response(GatewayError::Validation(format!(
+                "workflow step '{}' references unknown operation_id '{}'",
+                step.name, step.operation_id
+            ))));
+        }
+    }
+
+    Ok(())
 }
 
 fn parse_api_spec_id(input: &str) -> Result<ApiSpecId, GatewayError> {
