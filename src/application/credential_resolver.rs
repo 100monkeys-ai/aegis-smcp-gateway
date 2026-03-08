@@ -60,6 +60,19 @@ impl CredentialResolver {
                 self.resolve_human_delegated(target_service, zaru_user_token)
                     .await
             }
+            CredentialResolutionPath::Auto {
+                system_jit_openbao_engine_path,
+                system_jit_role,
+                target_service,
+            } => {
+                if zaru_user_token.is_some() {
+                    self.resolve_human_delegated(target_service, zaru_user_token)
+                        .await
+                } else {
+                    self.resolve_system_jit(system_jit_openbao_engine_path, system_jit_role)
+                        .await
+                }
+            }
             CredentialResolutionPath::StaticRef(reference) => {
                 self.resolve_static_ref(&reference.key).await
             }

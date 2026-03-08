@@ -4,4 +4,5 @@ pub mod errors;
 pub mod http_client;
 pub mod openapi;
 pub mod persistence;
+pub mod security_contexts;
 pub mod smcp;

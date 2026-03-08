@@ -99,5 +99,10 @@ pub enum CredentialResolutionPath {
     HumanDelegated {
         target_service: String,
     },
+    Auto {
+        system_jit_openbao_engine_path: String,
+        system_jit_role: String,
+        target_service: String,
+    },
     StaticRef(CredentialRef),
 }

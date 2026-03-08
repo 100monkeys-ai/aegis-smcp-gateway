@@ -6,7 +6,8 @@ use serde_json::Value;
 use crate::application::{CliEngine, CliInvocation, WorkflowEngine};
 use crate::domain::SmcpEnvelope;
 use crate::domain::{
-    EphemeralCliToolRepository, SmcpSessionRepository, SmcpSessionStatus, ToolWorkflow, WorkflowId,
+    EphemeralCliToolRepository, SecurityContextRepository, SmcpSessionRepository,
+    SmcpSessionStatus, ToolWorkflow, WorkflowId,
 };
 use crate::infrastructure::config::GatewayConfig;
 use crate::infrastructure::errors::GatewayError;
@@ -18,6 +19,7 @@ pub struct InvocationService {
     cli_engine: CliEngine,
     cli_tools: Arc<dyn EphemeralCliToolRepository>,
     smcp_sessions: Arc<dyn SmcpSessionRepository>,
+    security_contexts: Arc<dyn SecurityContextRepository>,
     config: GatewayConfig,
 }
 
@@ -27,6 +29,7 @@ impl InvocationService {
         cli_engine: CliEngine,
         cli_tools: Arc<dyn EphemeralCliToolRepository>,
         smcp_sessions: Arc<dyn SmcpSessionRepository>,
+        security_contexts: Arc<dyn SecurityContextRepository>,
         config: GatewayConfig,
     ) -> Self {
         Self {
@@ -34,6 +37,7 @@ impl InvocationService {
             cli_engine,
             cli_tools,
             smcp_sessions,
+            security_contexts,
             config,
         }
     }
@@ -78,6 +82,11 @@ impl InvocationService {
         {
             return Err(GatewayError::Forbidden);
         }
+        let security_context = self
+            .security_contexts
+            .find_by_name(&session.security_context)
+            .await?
+            .ok_or(GatewayError::Forbidden)?;
 
         if self
             .cli_tools
@@ -85,6 +94,9 @@ impl InvocationService {
             .await?
             .is_some()
         {
+            if !security_context.capabilities.allow_cli_tools {
+                return Err(GatewayError::Forbidden);
+            }
             let command = call
                 .arguments
                 .get("subcommand")
@@ -123,12 +135,18 @@ impl InvocationService {
                 })
                 .await
         } else {
+            if !security_context.capabilities.allow_workflow_tools {
+                return Err(GatewayError::Forbidden);
+            }
             self.workflow_engine
                 .invoke_by_name(
                     &call.execution_id,
                     &call.tool_name,
                     call.arguments,
                     zaru_user_token,
+                    security_context
+                        .capabilities
+                        .allow_human_delegated_credentials,
                 )
                 .await
         }
@@ -141,7 +159,17 @@ impl InvocationService {
         args: Value,
         zaru_user_token: Option<&str>,
     ) -> Result<Value, GatewayError> {
+        let security_context = self
+            .security_contexts
+            .find_by_name("internal")
+            .await?
+            .ok_or_else(|| {
+                GatewayError::Internal("missing required security context 'internal'".to_string())
+            })?;
         if self.cli_tools.find_by_name(tool_name).await?.is_some() {
+            if !security_context.capabilities.allow_cli_tools {
+                return Err(GatewayError::Forbidden);
+            }
             let command = args
                 .get("subcommand")
                 .and_then(|v| v.as_str())
@@ -177,8 +205,19 @@ impl InvocationService {
                 })
                 .await
         } else {
+            if !security_context.capabilities.allow_workflow_tools {
+                return Err(GatewayError::Forbidden);
+            }
             self.workflow_engine
-                .invoke_by_name(execution_id, tool_name, args, zaru_user_token)
+                .invoke_by_name(
+                    execution_id,
+                    tool_name,
+                    args,
+                    zaru_user_token,
+                    security_context
+                        .capabilities
+                        .allow_human_delegated_credentials,
+                )
                 .await
         }
     }

@@ -4,10 +4,12 @@ use crate::application::{ExplorerService, InvocationService};
 use crate::domain::{
     ApiSpecRepository, EphemeralCliToolRepository, SmcpSessionRepository, ToolWorkflowRepository,
 };
+use crate::infrastructure::config::GatewayConfig;
 use crate::infrastructure::persistence::EventStore;
 
 #[derive(Clone)]
 pub struct AppState {
+    pub config: GatewayConfig,
     pub specs: Arc<dyn ApiSpecRepository>,
     pub workflows: Arc<dyn ToolWorkflowRepository>,
     pub cli_tools: Arc<dyn EphemeralCliToolRepository>,

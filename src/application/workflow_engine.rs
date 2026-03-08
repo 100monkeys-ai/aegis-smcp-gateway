@@ -7,8 +7,8 @@ use serde_json::{json, Value};
 
 use crate::application::credential_resolver::CredentialResolver;
 use crate::domain::{
-    ApiSpecRepository, GatewayEvent, StepErrorPolicy, ToolWorkflow, ToolWorkflowRepository,
-    WorkflowId,
+    ApiSpecRepository, CredentialResolutionPath, GatewayEvent, StepErrorPolicy, ToolWorkflow,
+    ToolWorkflowRepository, WorkflowId,
 };
 use crate::infrastructure::errors::GatewayError;
 use crate::infrastructure::http_client::HttpClient;
@@ -46,14 +46,21 @@ impl WorkflowEngine {
         name: &str,
         input: Value,
         zaru_user_token: Option<&str>,
+        allow_human_delegated_credentials: bool,
     ) -> Result<Value, GatewayError> {
         let workflow = self
             .workflows
             .find_by_name(name)
             .await?
             .ok_or_else(|| GatewayError::NotFound(format!("workflow '{name}' not found")))?;
-        self.invoke(execution_id, &workflow, input, zaru_user_token)
-            .await
+        self.invoke(
+            execution_id,
+            &workflow,
+            input,
+            zaru_user_token,
+            allow_human_delegated_credentials,
+        )
+        .await
     }
 
     pub async fn invoke(
@@ -62,6 +69,7 @@ impl WorkflowEngine {
         workflow: &ToolWorkflow,
         input: Value,
         zaru_user_token: Option<&str>,
+        allow_human_delegated_credentials: bool,
     ) -> Result<Value, GatewayError> {
         let started = Instant::now();
         self.event_store
@@ -82,20 +90,21 @@ impl WorkflowEngine {
             .await?
             .ok_or_else(|| GatewayError::NotFound("api spec not found for workflow".to_string()))?;
 
-        let resolution_path_label = match &spec.credential_path {
-            crate::domain::CredentialResolutionPath::SystemJit { .. } => "system_jit",
-            crate::domain::CredentialResolutionPath::HumanDelegated { .. } => "human_delegated",
-            crate::domain::CredentialResolutionPath::StaticRef(_) => "static_ref",
+        let resolved_credential_path = resolve_credential_path_for_session(
+            &spec.credential_path,
+            zaru_user_token,
+            allow_human_delegated_credentials,
+        )?;
+        let resolution_path_label = match &resolved_credential_path {
+            CredentialResolutionPath::SystemJit { .. } => "system_jit",
+            CredentialResolutionPath::HumanDelegated { .. } => "human_delegated",
+            CredentialResolutionPath::Auto { .. } => "auto",
+            CredentialResolutionPath::StaticRef(_) => "static_ref",
         };
-        let target_service = match &spec.credential_path {
-            crate::domain::CredentialResolutionPath::HumanDelegated { target_service } => {
-                target_service.clone()
-            }
-            _ => "unknown".to_string(),
-        };
+        let target_service = target_service_from_credential_path(&resolved_credential_path);
         let credential_headers = match self
             .credential_resolver
-            .resolve(&spec.credential_path, zaru_user_token)
+            .resolve(&resolved_credential_path, zaru_user_token)
             .await
         {
             Ok(headers) => {
@@ -279,5 +288,51 @@ impl WorkflowEngine {
         id: WorkflowId,
     ) -> Result<Option<ToolWorkflow>, GatewayError> {
         self.workflows.find_by_id(id).await
+    }
+}
+
+fn resolve_credential_path_for_session(
+    path: &CredentialResolutionPath,
+    zaru_user_token: Option<&str>,
+    allow_human_delegated_credentials: bool,
+) -> Result<CredentialResolutionPath, GatewayError> {
+    match path {
+        CredentialResolutionPath::HumanDelegated { .. } => {
+            if zaru_user_token.is_none() {
+                return Err(GatewayError::Unauthorized);
+            }
+            if !allow_human_delegated_credentials {
+                return Err(GatewayError::Forbidden);
+            }
+            Ok(path.clone())
+        }
+        CredentialResolutionPath::Auto {
+            system_jit_openbao_engine_path,
+            system_jit_role,
+            target_service,
+        } => {
+            if zaru_user_token.is_some() {
+                if !allow_human_delegated_credentials {
+                    return Err(GatewayError::Forbidden);
+                }
+                Ok(CredentialResolutionPath::HumanDelegated {
+                    target_service: target_service.clone(),
+                })
+            } else {
+                Ok(CredentialResolutionPath::SystemJit {
+                    openbao_engine_path: system_jit_openbao_engine_path.clone(),
+                    role: system_jit_role.clone(),
+                })
+            }
+        }
+        _ => Ok(path.clone()),
+    }
+}
+
+fn target_service_from_credential_path(path: &CredentialResolutionPath) -> String {
+    match path {
+        CredentialResolutionPath::HumanDelegated { target_service }
+        | CredentialResolutionPath::Auto { target_service, .. } => target_service.clone(),
+        _ => "unknown".to_string(),
     }
 }

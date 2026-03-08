@@ -1,8 +1,10 @@
 use serde_json::Value;
+use tonic::metadata::MetadataMap;
 use tonic::{Request, Response, Status};
 
 use crate::application::ApiExplorerRequest;
 use crate::domain::{StepErrorPolicy, ToolWorkflow, WorkflowStep};
+use crate::infrastructure::auth::verify_operator_token;
 use crate::presentation::state::AppState;
 
 pub mod proto {
@@ -18,6 +20,33 @@ impl GatewayGrpcService {
     pub fn new(state: AppState) -> Self {
         Self { state }
     }
+
+    fn require_operator_metadata(&self, metadata: &MetadataMap) -> Result<(), Status> {
+        if self.state.config.auth_disabled {
+            return Ok(());
+        }
+
+        let auth = metadata
+            .get("authorization")
+            .and_then(|value| value.to_str().ok())
+            .ok_or_else(|| Status::unauthenticated("missing authorization metadata"))?;
+        let token = auth
+            .strip_prefix("Bearer ")
+            .or_else(|| auth.strip_prefix("bearer "))
+            .ok_or_else(|| Status::unauthenticated("invalid bearer metadata"))?;
+
+        verify_operator_token(&self.state.config, token).map_err(|status| match status {
+            axum::http::StatusCode::UNAUTHORIZED => {
+                Status::unauthenticated("operator token validation failed")
+            }
+            axum::http::StatusCode::FORBIDDEN => {
+                Status::permission_denied("operator role required")
+            }
+            _ => Status::internal("operator auth failure"),
+        })?;
+
+        Ok(())
+    }
 }
 
 #[tonic::async_trait]
@@ -26,6 +55,7 @@ impl proto::tool_workflow_service_server::ToolWorkflowService for GatewayGrpcSer
         &self,
         request: Request<proto::CreateWorkflowRequest>,
     ) -> Result<Response<proto::CreateWorkflowResponse>, Status> {
+        self.require_operator_metadata(request.metadata())?;
         let workflow = request
             .into_inner()
             .workflow
@@ -64,6 +94,7 @@ impl proto::tool_workflow_service_server::ToolWorkflowService for GatewayGrpcSer
         &self,
         request: Request<proto::GetWorkflowRequest>,
     ) -> Result<Response<proto::GetWorkflowResponse>, Status> {
+        self.require_operator_metadata(request.metadata())?;
         let id = parse_uuid_wrapped(&request.into_inner().workflow_id).map_err(invalid)?;
         let workflow = self
             .state
@@ -80,8 +111,9 @@ impl proto::tool_workflow_service_server::ToolWorkflowService for GatewayGrpcSer
 
     async fn list_workflows(
         &self,
-        _request: Request<proto::ListWorkflowsRequest>,
+        request: Request<proto::ListWorkflowsRequest>,
     ) -> Result<Response<proto::ListWorkflowsResponse>, Status> {
+        self.require_operator_metadata(request.metadata())?;
         let workflows = self
             .state
             .workflows
@@ -103,6 +135,7 @@ impl proto::tool_workflow_service_server::ToolWorkflowService for GatewayGrpcSer
         &self,
         request: Request<proto::UpdateWorkflowRequest>,
     ) -> Result<Response<proto::UpdateWorkflowResponse>, Status> {
+        self.require_operator_metadata(request.metadata())?;
         let workflow = request
             .into_inner()
             .workflow
@@ -143,6 +176,7 @@ impl proto::tool_workflow_service_server::ToolWorkflowService for GatewayGrpcSer
         &self,
         request: Request<proto::DeleteWorkflowRequest>,
     ) -> Result<Response<proto::DeleteWorkflowResponse>, Status> {
+        self.require_operator_metadata(request.metadata())?;
         let id = parse_uuid(&request.into_inner().workflow_id).map_err(invalid)?;
         self.state
             .workflows
@@ -227,6 +261,7 @@ impl proto::gateway_invocation_service_server::GatewayInvocationService for Gate
         &self,
         request: Request<proto::ExploreApiRequest>,
     ) -> Result<Response<proto::ExploreApiResponse>, Status> {
+        self.require_operator_metadata(request.metadata())?;
         let req = request.into_inner();
         let parameters: Value = serde_json::from_str(&req.parameters_json)
             .map_err(|e| Status::invalid_argument(format!("invalid parameters_json: {e}")))?;

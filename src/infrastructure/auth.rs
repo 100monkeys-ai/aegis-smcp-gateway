@@ -35,6 +35,12 @@ pub async fn require_operator(
         .or_else(|| auth.strip_prefix("bearer "))
         .ok_or(StatusCode::UNAUTHORIZED)?;
 
+    verify_operator_token(&config, token)?;
+
+    Ok(next.run(request).await)
+}
+
+pub fn verify_operator_token(config: &GatewayConfig, token: &str) -> Result<(), StatusCode> {
     if config.operator_jwt_public_key_pem.trim().is_empty() {
         return Err(StatusCode::UNAUTHORIZED);
     }
@@ -58,5 +64,5 @@ pub async fn require_operator(
         return Err(StatusCode::FORBIDDEN);
     }
 
-    Ok(next.run(request).await)
+    Ok(())
 }

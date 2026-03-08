@@ -68,10 +68,12 @@ impl ExplorerService {
         let resolution_path_label = match &spec.credential_path {
             crate::domain::CredentialResolutionPath::SystemJit { .. } => "system_jit",
             crate::domain::CredentialResolutionPath::HumanDelegated { .. } => "human_delegated",
+            crate::domain::CredentialResolutionPath::Auto { .. } => "auto",
             crate::domain::CredentialResolutionPath::StaticRef(_) => "static_ref",
         };
         let target_service = match &spec.credential_path {
-            crate::domain::CredentialResolutionPath::HumanDelegated { target_service } => {
+            crate::domain::CredentialResolutionPath::HumanDelegated { target_service }
+            | crate::domain::CredentialResolutionPath::Auto { target_service, .. } => {
                 target_service.clone()
             }
             _ => "unknown".to_string(),

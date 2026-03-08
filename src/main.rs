@@ -26,6 +26,7 @@ use infrastructure::http_client::HttpClient;
 use infrastructure::persistence::postgres::PostgresStore;
 use infrastructure::persistence::sqlite::SqliteStore;
 use infrastructure::persistence::EventStore;
+use infrastructure::security_contexts::InMemorySecurityContextStore;
 use presentation::control_plane::*;
 use presentation::grpc::proto::gateway_invocation_service_server::GatewayInvocationServiceServer;
 use presentation::grpc::proto::tool_workflow_service_server::ToolWorkflowServiceServer;
@@ -89,6 +90,7 @@ async fn main() -> anyhow::Result<()> {
     let http_client = HttpClient::new()?;
     let credential_resolver = CredentialResolver::new(config.clone());
     let semantic_gate = SemanticGate::new(config.semantic_judge_url.clone());
+    let security_contexts = Arc::new(InMemorySecurityContextStore::with_defaults());
 
     let workflow_engine = WorkflowEngine::new(
         workflows.clone(),
@@ -115,10 +117,12 @@ async fn main() -> anyhow::Result<()> {
         cli_engine,
         cli_tools.clone(),
         smcp_sessions.clone(),
+        security_contexts,
         config.clone(),
     );
 
     let state = AppState {
+        config: config.clone(),
         specs,
         workflows,
         cli_tools,

@@ -2,6 +2,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+use crate::domain::SecurityContext;
 use crate::domain::{
     ApiSpec, ApiSpecId, ApiSpecSummary, EphemeralCliTool, EphemeralCliToolSummary, ToolWorkflow,
     ToolWorkflowSummary, WorkflowId,
@@ -41,6 +42,11 @@ pub trait SmcpSessionRepository: Send + Sync {
         &self,
         execution_id: &str,
     ) -> Result<Option<SmcpSessionRecord>, GatewayError>;
+}
+
+#[async_trait]
+pub trait SecurityContextRepository: Send + Sync {
+    async fn find_by_name(&self, name: &str) -> Result<Option<SecurityContext>, GatewayError>;
 }
 
 #[derive(Debug, Clone)]
