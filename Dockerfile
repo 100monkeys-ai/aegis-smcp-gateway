@@ -11,4 +11,5 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
 WORKDIR /app
 COPY --from=builder /app/target/release/aegis-smcp-gateway /usr/local/bin/aegis-smcp-gateway
 EXPOSE 8089
+EXPOSE 50055
 CMD ["aegis-smcp-gateway"]
