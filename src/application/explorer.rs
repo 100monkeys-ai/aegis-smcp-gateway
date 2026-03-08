@@ -67,7 +67,8 @@ impl ExplorerService {
         let url = format!("{}{}", spec.base_url.trim_end_matches('/'), operation.path);
         let headers = self
             .credential_resolver
-            .resolve(&spec.credential_path, zaru_user_token)?;
+            .resolve(&spec.credential_path, zaru_user_token)
+            .await?;
         let (status, response) = self
             .http_client
             .execute(&operation.method, &url, &headers, Some(req.parameters))

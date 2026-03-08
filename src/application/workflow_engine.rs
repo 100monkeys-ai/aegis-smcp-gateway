@@ -84,7 +84,8 @@ impl WorkflowEngine {
 
         let credential_headers = self
             .credential_resolver
-            .resolve(&spec.credential_path, zaru_user_token)?;
+            .resolve(&spec.credential_path, zaru_user_token)
+            .await?;
 
         let mut state = HashMap::<String, Value>::new();
         state.insert("input".to_string(), input);

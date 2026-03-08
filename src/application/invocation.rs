@@ -60,6 +60,9 @@ impl InvocationService {
             &self.config.smcp_jwt_issuer,
             &self.config.smcp_jwt_audience,
         )?;
+        if call.execution_id != session.execution_id {
+            return Err(GatewayError::Unauthorized);
+        }
 
         if self
             .cli_tools

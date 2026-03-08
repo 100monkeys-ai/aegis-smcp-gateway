@@ -92,7 +92,10 @@ pub struct CredentialRef {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum CredentialResolutionPath {
-    SystemJit { role: String },
+    SystemJit {
+        openbao_engine_path: String,
+        role: String,
+    },
     HumanDelegated { target_service: String },
     StaticRef(CredentialRef),
 }

@@ -12,6 +12,12 @@ pub struct GatewayConfig {
     pub smcp_jwt_public_key_pem: String,
     pub smcp_jwt_issuer: String,
     pub smcp_jwt_audience: String,
+    pub openbao_addr: Option<String>,
+    pub openbao_token: Option<String>,
+    pub openbao_kv_mount: String,
+    pub keycloak_token_exchange_url: Option<String>,
+    pub keycloak_client_id: Option<String>,
+    pub keycloak_client_secret: Option<String>,
     pub semantic_judge_url: Option<String>,
     pub nfs_server_host: String,
     pub nfs_port: u16,
@@ -38,6 +44,23 @@ impl GatewayConfig {
             .unwrap_or_else(|_| "aegis-orchestrator".to_string());
         let smcp_jwt_audience = env::var("SMCP_GATEWAY_SMCP_JWT_AUDIENCE")
             .unwrap_or_else(|_| "aegis-agents".to_string());
+        let openbao_addr = env::var("SMCP_GATEWAY_OPENBAO_ADDR")
+            .ok()
+            .filter(|value| !value.trim().is_empty());
+        let openbao_token = env::var("SMCP_GATEWAY_OPENBAO_TOKEN")
+            .ok()
+            .filter(|value| !value.trim().is_empty());
+        let openbao_kv_mount = env::var("SMCP_GATEWAY_OPENBAO_KV_MOUNT")
+            .unwrap_or_else(|_| "secret".to_string());
+        let keycloak_token_exchange_url = env::var("SMCP_GATEWAY_KEYCLOAK_TOKEN_EXCHANGE_URL")
+            .ok()
+            .filter(|value| !value.trim().is_empty());
+        let keycloak_client_id = env::var("SMCP_GATEWAY_KEYCLOAK_CLIENT_ID")
+            .ok()
+            .filter(|value| !value.trim().is_empty());
+        let keycloak_client_secret = env::var("SMCP_GATEWAY_KEYCLOAK_CLIENT_SECRET")
+            .ok()
+            .filter(|value| !value.trim().is_empty());
         let semantic_judge_url = env::var("SMCP_GATEWAY_SEMANTIC_JUDGE_URL")
             .ok()
             .filter(|value| !value.trim().is_empty());
@@ -65,6 +88,12 @@ impl GatewayConfig {
             smcp_jwt_public_key_pem,
             smcp_jwt_issuer,
             smcp_jwt_audience,
+            openbao_addr,
+            openbao_token,
+            openbao_kv_mount,
+            keycloak_token_exchange_url,
+            keycloak_client_id,
+            keycloak_client_secret,
             semantic_judge_url,
             nfs_server_host,
             nfs_port,

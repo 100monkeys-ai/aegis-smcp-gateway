@@ -80,7 +80,7 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let http_client = HttpClient::new()?;
-    let credential_resolver = CredentialResolver::new();
+    let credential_resolver = CredentialResolver::new(config.clone());
     let semantic_gate = SemanticGate::new(config.semantic_judge_url.clone());
 
     let workflow_engine = WorkflowEngine::new(

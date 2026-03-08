@@ -1,56 +1,258 @@
+use serde::Deserialize;
+
 use crate::domain::CredentialResolutionPath;
+use crate::infrastructure::config::GatewayConfig;
 use crate::infrastructure::errors::GatewayError;
 
 #[derive(Clone)]
-pub struct CredentialResolver;
+pub struct CredentialResolver {
+    config: GatewayConfig,
+    http_client: reqwest::Client,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenBaoDynamicResponse {
+    data: Option<std::collections::HashMap<String, String>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenBaoKvEnvelope {
+    data: Option<OpenBaoKvInner>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenBaoKvInner {
+    data: Option<std::collections::HashMap<String, String>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct KeycloakTokenExchangeResponse {
+    access_token: String,
+}
 
 impl CredentialResolver {
-    pub fn new() -> Self {
-        Self
+    pub fn new(config: GatewayConfig) -> Self {
+        Self {
+            config,
+            http_client: reqwest::Client::new(),
+        }
     }
 
-    pub fn resolve(
+    pub async fn resolve(
         &self,
         path: &CredentialResolutionPath,
         zaru_user_token: Option<&str>,
     ) -> Result<Vec<(String, String)>, GatewayError> {
         match path {
-            CredentialResolutionPath::SystemJit { role } => {
-                let env_key = format!("OPENBAO_JIT_{}", role.to_ascii_uppercase());
-                let secret = std::env::var(env_key).map_err(|_| {
-                    GatewayError::NotFound(
-                        "missing system JIT credential env var for configured role".to_string(),
-                    )
-                })?;
-                Ok(vec![(
-                    "Authorization".to_string(),
-                    format!("Bearer {secret}"),
-                )])
-            }
+            CredentialResolutionPath::SystemJit {
+                openbao_engine_path,
+                role,
+            } => self.resolve_system_jit(openbao_engine_path, role).await,
             CredentialResolutionPath::HumanDelegated { target_service } => {
-                let token = zaru_user_token.ok_or(GatewayError::Unauthorized)?;
-                if target_service.trim().is_empty() {
-                    return Err(GatewayError::Validation(
-                        "human delegated target_service cannot be empty".to_string(),
-                    ));
-                }
-                Ok(vec![(
-                    "Authorization".to_string(),
-                    format!("Bearer {token}"),
-                )])
+                self.resolve_human_delegated(target_service, zaru_user_token)
+                    .await
             }
             CredentialResolutionPath::StaticRef(reference) => {
-                let env_key = format!("OPENBAO_STATIC_{}", reference.key.to_ascii_uppercase());
-                let token = std::env::var(env_key).map_err(|_| {
-                    GatewayError::NotFound(
-                        "missing static credential env var for configured reference".to_string(),
-                    )
-                })?;
-                Ok(vec![(
-                    "Authorization".to_string(),
-                    format!("Bearer {token}"),
-                )])
+                self.resolve_static_ref(&reference.key).await
             }
         }
+    }
+
+    async fn resolve_system_jit(
+        &self,
+        openbao_engine_path: &str,
+        role: &str,
+    ) -> Result<Vec<(String, String)>, GatewayError> {
+        let openbao_addr = self
+            .config
+            .openbao_addr
+            .as_deref()
+            .ok_or_else(|| GatewayError::Internal("SMCP_GATEWAY_OPENBAO_ADDR is required".to_string()))?;
+        let openbao_token = self
+            .config
+            .openbao_token
+            .as_deref()
+            .ok_or_else(|| GatewayError::Internal("SMCP_GATEWAY_OPENBAO_TOKEN is required".to_string()))?;
+
+        if openbao_engine_path.trim().is_empty() || role.trim().is_empty() {
+            return Err(GatewayError::Validation(
+                "SystemJit requires non-empty openbao_engine_path and role".to_string(),
+            ));
+        }
+
+        let path = format!(
+            "{}/v1/{}/creds/{}",
+            openbao_addr.trim_end_matches('/'),
+            openbao_engine_path.trim_matches('/'),
+            role
+        );
+        let response = self
+            .http_client
+            .get(path)
+            .header("X-Vault-Token", openbao_token)
+            .send()
+            .await
+            .map_err(|err| GatewayError::Http(format!("OpenBao JIT request failed: {err}")))?;
+
+        if !response.status().is_success() {
+            return Err(GatewayError::Http(format!(
+                "OpenBao JIT request returned {}",
+                response.status()
+            )));
+        }
+
+        let payload: OpenBaoDynamicResponse = response
+            .json()
+            .await
+            .map_err(|err| GatewayError::Serialization(format!("invalid OpenBao JIT response: {err}")))?;
+
+        let data = payload.data.ok_or_else(|| {
+            GatewayError::Serialization("OpenBao JIT response missing data".to_string())
+        })?;
+        let token = data.get("token").or_else(|| data.get("password")).ok_or_else(|| {
+            GatewayError::Serialization(
+                "OpenBao JIT response missing token/password field".to_string(),
+            )
+        })?;
+
+        Ok(vec![(
+            "Authorization".to_string(),
+            format!("Bearer {token}"),
+        )])
+    }
+
+    async fn resolve_static_ref(&self, key: &str) -> Result<Vec<(String, String)>, GatewayError> {
+        if key.trim().is_empty() {
+            return Err(GatewayError::Validation(
+                "StaticRef key cannot be empty".to_string(),
+            ));
+        }
+        let openbao_addr = self
+            .config
+            .openbao_addr
+            .as_deref()
+            .ok_or_else(|| GatewayError::Internal("SMCP_GATEWAY_OPENBAO_ADDR is required".to_string()))?;
+        let openbao_token = self
+            .config
+            .openbao_token
+            .as_deref()
+            .ok_or_else(|| GatewayError::Internal("SMCP_GATEWAY_OPENBAO_TOKEN is required".to_string()))?;
+
+        let path = format!(
+            "{}/v1/{}/data/{}",
+            openbao_addr.trim_end_matches('/'),
+            self.config.openbao_kv_mount.trim_matches('/'),
+            key.trim_matches('/')
+        );
+
+        let response = self
+            .http_client
+            .get(path)
+            .header("X-Vault-Token", openbao_token)
+            .send()
+            .await
+            .map_err(|err| GatewayError::Http(format!("OpenBao KV request failed: {err}")))?;
+
+        if !response.status().is_success() {
+            return Err(GatewayError::Http(format!(
+                "OpenBao KV request returned {}",
+                response.status()
+            )));
+        }
+
+        let payload: OpenBaoKvEnvelope = response
+            .json()
+            .await
+            .map_err(|err| GatewayError::Serialization(format!("invalid OpenBao KV response: {err}")))?;
+
+        let token = payload
+            .data
+            .and_then(|data| data.data)
+            .and_then(|fields| fields.get("token").cloned().or_else(|| fields.get("value").cloned()))
+            .ok_or_else(|| {
+                GatewayError::Serialization(
+                    "OpenBao KV response missing token/value field".to_string(),
+                )
+            })?;
+
+        Ok(vec![(
+            "Authorization".to_string(),
+            format!("Bearer {token}"),
+        )])
+    }
+
+    async fn resolve_human_delegated(
+        &self,
+        target_service: &str,
+        zaru_user_token: Option<&str>,
+    ) -> Result<Vec<(String, String)>, GatewayError> {
+        if target_service.trim().is_empty() {
+            return Err(GatewayError::Validation(
+                "human delegated target_service cannot be empty".to_string(),
+            ));
+        }
+        let subject_token = zaru_user_token.ok_or(GatewayError::Unauthorized)?;
+
+        let exchange_url = self
+            .config
+            .keycloak_token_exchange_url
+            .as_deref()
+            .ok_or_else(|| {
+                GatewayError::Internal(
+                    "SMCP_GATEWAY_KEYCLOAK_TOKEN_EXCHANGE_URL is required".to_string(),
+                )
+            })?;
+        let client_id = self.config.keycloak_client_id.as_deref().ok_or_else(|| {
+            GatewayError::Internal("SMCP_GATEWAY_KEYCLOAK_CLIENT_ID is required".to_string())
+        })?;
+        let client_secret = self
+            .config
+            .keycloak_client_secret
+            .as_deref()
+            .ok_or_else(|| {
+                GatewayError::Internal(
+                    "SMCP_GATEWAY_KEYCLOAK_CLIENT_SECRET is required".to_string(),
+                )
+            })?;
+
+        let form = [
+            ("grant_type", "urn:ietf:params:oauth:grant-type:token-exchange"),
+            (
+                "subject_token_type",
+                "urn:ietf:params:oauth:token-type:access_token",
+            ),
+            ("requested_token_type", "urn:ietf:params:oauth:token-type:access_token"),
+            ("subject_token", subject_token),
+            ("audience", target_service),
+            ("client_id", client_id),
+            ("client_secret", client_secret),
+        ];
+
+        let response = self
+            .http_client
+            .post(exchange_url)
+            .form(&form)
+            .send()
+            .await
+            .map_err(|err| GatewayError::Http(format!("Keycloak token exchange failed: {err}")))?;
+
+        if !response.status().is_success() {
+            return Err(GatewayError::Http(format!(
+                "Keycloak token exchange returned {}",
+                response.status()
+            )));
+        }
+
+        let payload: KeycloakTokenExchangeResponse = response
+            .json()
+            .await
+            .map_err(|err| GatewayError::Serialization(format!(
+                "invalid Keycloak token exchange response: {err}"
+            )))?;
+
+        Ok(vec![(
+            "Authorization".to_string(),
+            format!("Bearer {}", payload.access_token),
+        )])
     }
 }
