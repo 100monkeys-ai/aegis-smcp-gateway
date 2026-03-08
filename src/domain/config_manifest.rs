@@ -20,7 +20,7 @@ pub struct ConfigMetadata {
     pub labels: Option<HashMap<String, String>>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SmcpGatewayConfigSpec {
     #[serde(default)]
     pub network: GatewayNetworkConfig,
@@ -113,19 +113,6 @@ impl Default for SmcpGatewayConfigManifest {
                 labels: None,
             },
             spec: SmcpGatewayConfigSpec::default(),
-        }
-    }
-}
-
-impl Default for SmcpGatewayConfigSpec {
-    fn default() -> Self {
-        Self {
-            network: GatewayNetworkConfig::default(),
-            database: GatewayDatabaseConfig::default(),
-            auth: GatewayAuthConfig::default(),
-            credentials: GatewayCredentialsConfig::default(),
-            cli: GatewayCliConfig::default(),
-            ui: GatewayUiConfig::default(),
         }
     }
 }
