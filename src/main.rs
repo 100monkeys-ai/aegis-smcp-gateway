@@ -50,7 +50,7 @@ async fn main() -> anyhow::Result<()> {
         .with_env_filter(EnvFilter::from_default_env())
         .init();
 
-    let config = GatewayConfig::from_env();
+    let config = GatewayConfig::load_or_default()?;
     let (specs, workflows, cli_tools, smcp_sessions, security_contexts, event_store): RepositoryBundle =
         if config.database_url.starts_with("postgres://")
             || config.database_url.starts_with("postgresql://")

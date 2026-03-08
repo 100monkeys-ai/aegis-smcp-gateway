@@ -36,7 +36,60 @@ Standalone SMCP tooling gateway implementing ADR-053.
 
 ## Configuration
 
-Environment variables:
+The gateway uses a Kubernetes-style YAML manifest:
+
+- File name: `smcp-gateway-config.yaml`
+- API version: `100monkeys.ai/v1`
+- Kind: `SmcpGatewayConfig`
+
+Discovery order:
+
+1. `SMCP_GATEWAY_CONFIG_PATH`
+2. `./smcp-gateway-config.yaml`
+3. `~/.aegis/smcp-gateway-config.yaml`
+4. `/etc/aegis/smcp-gateway-config.yaml` (Unix) or `ProgramData\\Aegis\\smcp-gateway-config.yaml` (Windows)
+
+Environment variables are supported as runtime overrides (same names as before).
+
+### YAML Example
+
+```yaml
+apiVersion: 100monkeys.ai/v1
+kind: SmcpGatewayConfig
+metadata:
+  name: aegis-smcp-gateway
+  version: "1.0.0"
+spec:
+  network:
+    bind_addr: "0.0.0.0:8089"
+    grpc_bind_addr: "0.0.0.0:50055"
+  database:
+    url: "sqlite://gateway.db"
+  auth:
+    disabled: false
+    operator_jwt_public_key_pem: ""
+    operator_jwt_issuer: "aegis-keycloak"
+    operator_jwt_audience: "aegis-smcp-gateway"
+    smcp_jwt_public_key_pem: ""
+    smcp_jwt_issuer: "aegis-orchestrator"
+    smcp_jwt_audience: "aegis-agents"
+  credentials:
+    openbao_addr: null
+    openbao_token: null
+    openbao_kv_mount: "secret"
+    keycloak_token_exchange_url: null
+    keycloak_client_id: null
+    keycloak_client_secret: null
+  cli:
+    semantic_judge_url: null
+    nfs_server_host: "127.0.0.1"
+    nfs_port: 2049
+    nfs_mount_port: 20048
+  ui:
+    enabled: true
+```
+
+### Environment Overrides
 
 - `SMCP_GATEWAY_BIND` (default: `0.0.0.0:8089`)
 - `SMCP_GATEWAY_GRPC_BIND` (default: `0.0.0.0:50055`)
@@ -59,6 +112,7 @@ Environment variables:
 - `SMCP_GATEWAY_NFS_HOST` (default: `127.0.0.1`)
 - `SMCP_GATEWAY_NFS_PORT` (default: `2049`)
 - `SMCP_GATEWAY_NFS_MOUNT_PORT` (default: `20048`)
+- `SMCP_GATEWAY_CONFIG_PATH` (optional explicit path to YAML manifest)
 
 ## Run
 

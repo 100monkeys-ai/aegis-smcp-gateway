@@ -1,5 +1,6 @@
 pub mod api_spec;
 pub mod cli_tool;
+pub mod config_manifest;
 pub mod events;
 pub mod repositories;
 pub mod security_context;
@@ -9,6 +10,7 @@ pub mod tool_workflow;
 
 pub use api_spec::*;
 pub use cli_tool::*;
+pub use config_manifest::*;
 pub use events::*;
 pub use repositories::*;
 pub use security_context::*;
