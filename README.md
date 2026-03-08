@@ -26,9 +26,13 @@ Standalone SMCP tooling gateway implementing ADR-053.
 - `GET /v1/cli-tools`
 - `DELETE /v1/cli-tools/{name}`
 - `POST /v1/smcp/sessions`
+- `POST /v1/security-contexts`
+- `GET /v1/security-contexts`
+- `GET /v1/security-contexts/{name}`
 - `GET /v1/tools`
 - `POST /v1/explorer`
 - `POST /v1/invoke`
+- `GET /` (optional built-in web UI)
 
 ## Configuration
 
@@ -51,6 +55,7 @@ Environment variables:
 - `SMCP_GATEWAY_KEYCLOAK_CLIENT_ID` (required for `HumanDelegated` credential path)
 - `SMCP_GATEWAY_KEYCLOAK_CLIENT_SECRET` (required for `HumanDelegated` credential path)
 - `SMCP_GATEWAY_SEMANTIC_JUDGE_URL` (optional; required when invoking CLI tools with `require_semantic_judge=true`)
+- `SMCP_GATEWAY_UI_ENABLED` (default: `true`; set to `false` to disable built-in web UI routes)
 - `SMCP_GATEWAY_NFS_HOST` (default: `127.0.0.1`)
 - `SMCP_GATEWAY_NFS_PORT` (default: `2049`)
 - `SMCP_GATEWAY_NFS_MOUNT_PORT` (default: `20048`)

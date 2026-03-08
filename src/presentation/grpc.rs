@@ -460,6 +460,7 @@ mod tests {
             keycloak_client_id: None,
             keycloak_client_secret: None,
             semantic_judge_url: None,
+            ui_enabled: true,
             nfs_server_host: "127.0.0.1".to_string(),
             nfs_port: 2049,
             nfs_mount_port: 20048,

@@ -19,6 +19,7 @@ pub struct GatewayConfig {
     pub keycloak_client_id: Option<String>,
     pub keycloak_client_secret: Option<String>,
     pub semantic_judge_url: Option<String>,
+    pub ui_enabled: bool,
     pub nfs_server_host: String,
     pub nfs_port: u16,
     pub nfs_mount_port: u16,
@@ -64,6 +65,9 @@ impl GatewayConfig {
         let semantic_judge_url = env::var("SMCP_GATEWAY_SEMANTIC_JUDGE_URL")
             .ok()
             .filter(|value| !value.trim().is_empty());
+        let ui_enabled = env::var("SMCP_GATEWAY_UI_ENABLED")
+            .map(|v| !v.eq_ignore_ascii_case("false"))
+            .unwrap_or(true);
         let nfs_server_host =
             env::var("SMCP_GATEWAY_NFS_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
         let nfs_port = env::var("SMCP_GATEWAY_NFS_PORT")
@@ -95,6 +99,7 @@ impl GatewayConfig {
             keycloak_client_id,
             keycloak_client_secret,
             semantic_judge_url,
+            ui_enabled,
             nfs_server_host,
             nfs_port,
             nfs_mount_port,

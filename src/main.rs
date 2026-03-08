@@ -33,6 +33,7 @@ use presentation::grpc::proto::tool_workflow_service_server::ToolWorkflowService
 use presentation::grpc::GatewayGrpcService;
 use presentation::invocation::*;
 use presentation::state::AppState;
+use presentation::ui;
 
 type RepositoryBundle = (
     Arc<dyn ApiSpecRepository>,
@@ -166,11 +167,17 @@ async fn main() -> anyhow::Result<()> {
             require_operator,
         ));
 
-    let app = Router::new()
+    let mut app = Router::new()
         .merge(operator_routes)
         .route("/v1/invoke", post(invoke_smcp))
         .route("/health", get(|| async { "ok" }))
         .with_state(state.clone());
+    if config.ui_enabled {
+        app = app
+            .route("/", get(ui::index))
+            .route("/ui/app.js", get(ui::app_js))
+            .route("/ui/styles.css", get(ui::styles_css));
+    }
 
     let listener = tokio::net::TcpListener::bind(&config.bind_addr).await?;
     tracing::info!("aegis-smcp-gateway listening on {}", config.bind_addr);

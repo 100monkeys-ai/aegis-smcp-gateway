@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AEGIS SMCP Gateway</title>
+  <link rel="stylesheet" href="/ui/styles.css">
+</head>
+<body>
+  <main class="layout">
+    <header class="hero">
+      <div>
+        <h1>SMCP Gateway Console</h1>
+        <p class="subhead">Operator dashboard for specs, workflows, CLI tools, and security contexts.</p>
+      </div>
+      <div class="auth">
+        <label for="bearer-token">Bearer Token</label>
+        <input id="bearer-token" type="password" placeholder="Paste operator JWT">
+        <button id="save-token">Save</button>
+      </div>
+    </header>
+
+    <section class="stats">
+      <article class="stat-card"><h2 id="count-specs">0</h2><p>API Specs</p></article>
+      <article class="stat-card"><h2 id="count-workflows">0</h2><p>Workflows</p></article>
+      <article class="stat-card"><h2 id="count-cli">0</h2><p>CLI Tools</p></article>
+      <article class="stat-card"><h2 id="count-security-contexts">0</h2><p>Security Contexts</p></article>
+    </section>
+
+    <section class="panel-grid">
+      <article class="panel">
+        <h3>API Specs</h3>
+        <form id="spec-form" class="inline-form">
+          <input id="spec-name" placeholder="name" required>
+          <input id="spec-base-url" placeholder="base_url" required>
+          <input id="spec-source-url" placeholder="source_url (optional)">
+          <select id="spec-credential-type">
+            <option value="StaticRef">StaticRef</option>
+            <option value="SystemJit">SystemJit</option>
+            <option value="HumanDelegated">HumanDelegated</option>
+            <option value="Auto">Auto</option>
+          </select>
+          <textarea id="spec-inline-json" rows="4" placeholder="inline OpenAPI JSON"></textarea>
+          <input id="spec-credential-json" placeholder='credential config JSON (e.g. {"key":"docker/github"})'>
+          <button type="submit">Create Spec</button>
+        </form>
+        <pre id="spec-list" class="json"></pre>
+      </article>
+
+      <article class="panel">
+        <h3>Workflows</h3>
+        <form id="workflow-form" class="inline-form">
+          <input id="wf-name" placeholder="name" required>
+          <input id="wf-description" placeholder="description" required>
+          <input id="wf-api-spec-id" placeholder="api_spec_id" required>
+          <textarea id="wf-input-schema" rows="3" placeholder='input_schema JSON'></textarea>
+          <textarea id="wf-steps" rows="5" placeholder='steps JSON array'></textarea>
+          <button type="submit">Create Workflow</button>
+        </form>
+        <pre id="workflow-list" class="json"></pre>
+      </article>
+
+      <article class="panel">
+        <h3>CLI Tools</h3>
+        <form id="cli-form" class="inline-form">
+          <input id="cli-name" placeholder="name" required>
+          <input id="cli-description" placeholder="description" required>
+          <input id="cli-image" placeholder="docker_image" required>
+          <input id="cli-subcommands" placeholder='subcommands CSV, e.g. plan,apply' required>
+          <input id="cli-timeout" type="number" min="1" max="300" value="60" required>
+          <select id="cli-semantic"><option value="true">semantic judge required</option><option value="false">semantic judge optional</option></select>
+          <select id="cli-credential-type">
+            <option value="">No registry creds</option>
+            <option value="StaticRef">StaticRef</option>
+            <option value="SystemJit">SystemJit</option>
+            <option value="HumanDelegated">HumanDelegated</option>
+            <option value="Auto">Auto</option>
+          </select>
+          <input id="cli-credential-json" placeholder='credential config JSON'>
+          <button type="submit">Create CLI Tool</button>
+        </form>
+        <pre id="cli-list" class="json"></pre>
+      </article>
+
+      <article class="panel">
+        <h3>Security Contexts</h3>
+        <form id="security-context-form" class="inline-form">
+          <input id="ctx-name" placeholder="name" required>
+          <label><input id="ctx-workflow" type="checkbox" checked> Workflow tools</label>
+          <label><input id="ctx-cli" type="checkbox" checked> CLI tools</label>
+          <label><input id="ctx-explorer" type="checkbox"> Explorer</label>
+          <label><input id="ctx-human" type="checkbox"> Human delegated creds</label>
+          <button type="submit">Save Context</button>
+        </form>
+        <pre id="security-context-list" class="json"></pre>
+      </article>
+    </section>
+
+    <footer class="footer">
+      <button id="refresh-all">Refresh All</button>
+      <p id="status-text">Ready</p>
+    </footer>
+  </main>
+  <script src="/ui/app.js"></script>
+</body>
+</html>

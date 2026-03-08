@@ -1,0 +1,172 @@
+:root {
+  --bg-0: #f3f0e7;
+  --bg-1: #fffaf0;
+  --ink: #1f2933;
+  --ink-muted: #52606d;
+  --brand: #0f766e;
+  --brand-deep: #115e59;
+  --edge: #d9e2ec;
+  --good: #166534;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  color: var(--ink);
+  font-family: "Space Grotesk", "Avenir Next", "Segoe UI", sans-serif;
+  background: radial-gradient(circle at 5% 0%, #dbeafe, transparent 40%),
+    radial-gradient(circle at 95% 20%, #fde68a, transparent 45%),
+    linear-gradient(180deg, var(--bg-0), var(--bg-1));
+}
+
+.layout {
+  max-width: 1240px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+.hero {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+  padding: 20px;
+  border: 1px solid var(--edge);
+  border-radius: 14px;
+  background: #ffffffd6;
+  backdrop-filter: blur(4px);
+}
+
+.eyebrow {
+  margin: 0 0 4px;
+  letter-spacing: 0.18em;
+  font-size: 11px;
+  color: var(--ink-muted);
+}
+
+h1 {
+  margin: 0;
+  font-size: 36px;
+}
+
+.subhead {
+  margin-top: 8px;
+  color: var(--ink-muted);
+}
+
+.auth {
+  width: 340px;
+  display: grid;
+  gap: 8px;
+}
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.stat-card {
+  padding: 16px;
+  background: #fff;
+  border: 1px solid var(--edge);
+  border-radius: 12px;
+}
+
+.stat-card h2 {
+  margin: 0;
+  color: var(--brand);
+}
+
+.stat-card p {
+  margin: 6px 0 0;
+  color: var(--ink-muted);
+}
+
+.panel-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+  gap: 14px;
+}
+
+.panel {
+  background: #fff;
+  border: 1px solid var(--edge);
+  border-radius: 12px;
+  padding: 14px;
+}
+
+.panel h3 {
+  margin-top: 4px;
+  margin-bottom: 12px;
+}
+
+.inline-form {
+  display: grid;
+  gap: 8px;
+}
+
+input,
+textarea,
+select,
+button {
+  border-radius: 10px;
+  border: 1px solid var(--edge);
+  padding: 9px 10px;
+  font-size: 14px;
+}
+
+textarea {
+  font-family: "IBM Plex Mono", "Consolas", monospace;
+}
+
+button {
+  background: var(--brand);
+  color: #fff;
+  border: 0;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+button:hover {
+  background: var(--brand-deep);
+}
+
+.json {
+  margin: 10px 0 0;
+  max-height: 230px;
+  overflow: auto;
+  background: #f8fafc;
+  padding: 10px;
+  border-radius: 10px;
+  border: 1px solid var(--edge);
+  font-family: "IBM Plex Mono", "Consolas", monospace;
+  font-size: 12px;
+}
+
+.footer {
+  margin-top: 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+#status-text {
+  color: var(--good);
+  font-weight: 600;
+}
+
+@media (max-width: 600px) {
+  .layout {
+    padding: 14px;
+  }
+
+  h1 {
+    font-size: 28px;
+  }
+}
