@@ -1,0 +1,75 @@
+use base64::Engine;
+use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
+use serde::Deserialize;
+use serde_json::Value;
+
+use crate::domain::{MpcToolCall, MpcToolParams, SmcpEnvelope};
+use crate::infrastructure::errors::GatewayError;
+
+#[derive(Debug, Clone, Deserialize)]
+struct SmcpClaims {
+    execution_id: String,
+    exp: usize,
+}
+
+pub struct SmcpVerifiedCall {
+    pub execution_id: String,
+    pub tool_name: String,
+    pub arguments: Value,
+}
+
+pub fn verify_and_extract(
+    envelope: &SmcpEnvelope,
+    public_key_b64: &str,
+    token_secret: &str,
+) -> Result<SmcpVerifiedCall, GatewayError> {
+    let pk_bytes = base64::engine::general_purpose::STANDARD
+        .decode(public_key_b64)
+        .map_err(|e| GatewayError::Smcp(format!("invalid public key b64: {e}")))?;
+    let pk_arr: [u8; 32] = pk_bytes
+        .try_into()
+        .map_err(|_| GatewayError::Smcp("public key must be 32 bytes".to_string()))?;
+    let key = VerifyingKey::from_bytes(&pk_arr)
+        .map_err(|e| GatewayError::Smcp(format!("invalid public key: {e}")))?;
+
+    let sig_bytes = base64::engine::general_purpose::STANDARD
+        .decode(&envelope.signature)
+        .map_err(|e| GatewayError::Smcp(format!("invalid signature b64: {e}")))?;
+    let sig_arr: [u8; 64] = sig_bytes
+        .try_into()
+        .map_err(|_| GatewayError::Smcp("signature must be 64 bytes".to_string()))?;
+    let sig = Signature::from_bytes(&sig_arr);
+
+    key.verify(&envelope.inner_mcp, &sig)
+        .map_err(|e| GatewayError::Smcp(format!("signature verify failed: {e}")))?;
+
+    let mut validation = Validation::new(Algorithm::HS256);
+    validation.validate_exp = true;
+    let claims = decode::<SmcpClaims>(
+        &envelope.security_token,
+        &DecodingKey::from_secret(token_secret.as_bytes()),
+        &validation,
+    )
+    .map_err(|e| GatewayError::Smcp(format!("security token invalid: {e}")))?
+    .claims;
+
+    let _exp = claims.exp;
+
+    let tool_call: MpcToolCall = serde_json::from_slice(&envelope.inner_mcp)
+        .map_err(|e| GatewayError::Smcp(format!("invalid inner MCP payload: {e}")))?;
+    if tool_call.method != "tools/call" {
+        return Err(GatewayError::Smcp(
+            "inner MCP method must be tools/call".to_string(),
+        ));
+    }
+
+    let params: MpcToolParams = serde_json::from_value(tool_call.params)
+        .map_err(|e| GatewayError::Smcp(format!("invalid tools/call params: {e}")))?;
+
+    Ok(SmcpVerifiedCall {
+        execution_id: claims.execution_id,
+        tool_name: params.name,
+        arguments: params.arguments,
+    })
+}

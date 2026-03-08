@@ -1,0 +1,32 @@
+[package]
+name = "aegis-smcp-gateway"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+authors = ["100monkeys AI, Inc."]
+license = "AGPL-3.0"
+repository = "https://github.com/100monkeys-ai/aegis-smcp-gateway"
+
+[dependencies]
+anyhow = "1.0"
+async-trait = "0.1"
+axum = { version = "0.8", features = ["macros"] }
+base64 = "0.22"
+chrono = { version = "0.4", features = ["serde"] }
+ed25519-dalek = "2.1"
+handlebars = "6.2"
+http = "1.1"
+jsonwebtoken = "9.3"
+jsonpath_lib = "0.3"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "sqlite", "chrono", "uuid", "json"] }
+thiserror = "2.0"
+tokio = { version = "1.44", features = ["macros", "rt-multi-thread", "signal", "process", "fs"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["trace"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+uuid = { version = "1.15", features = ["v4", "serde"] }
+
