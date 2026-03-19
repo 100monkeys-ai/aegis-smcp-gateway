@@ -124,3 +124,7 @@ The binary serves:
 
 - HTTP control/invocation API on `SMCP_GATEWAY_BIND`
 - gRPC `ToolWorkflowService` + `GatewayInvocationService` on `SMCP_GATEWAY_GRPC_BIND`
+
+## License
+
+AGPL-3.0. See [LICENSE](LICENSE) for details.
