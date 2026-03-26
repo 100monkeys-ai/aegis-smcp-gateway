@@ -419,6 +419,7 @@ impl SecurityContextRepository for PostgresStore {
             Ok(SecurityContext {
                 name: r.try_get("name")?,
                 capabilities: serde_json::from_str(&r.try_get::<String, _>("capabilities")?)?,
+                tenant_id: None,
             })
         })
         .transpose()
@@ -433,6 +434,7 @@ impl SecurityContextRepository for PostgresStore {
                 Ok(SecurityContext {
                     name: row.try_get("name")?,
                     capabilities: serde_json::from_str(&row.try_get::<String, _>("capabilities")?)?,
+                    tenant_id: None,
                 })
             })
             .collect()

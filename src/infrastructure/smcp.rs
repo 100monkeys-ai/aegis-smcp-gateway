@@ -10,12 +10,18 @@ use crate::infrastructure::errors::GatewayError;
 #[derive(Debug, Clone, Deserialize)]
 struct SmcpClaims {
     execution_id: String,
+    /// Tenant slug embedded in the SMCP security token (ADR-056).
+    /// Empty string for pre-multi-tenancy tokens (treated as system tenant).
+    #[serde(default)]
+    tenant_id: String,
 }
 
 pub struct SmcpVerifiedCall {
     pub execution_id: String,
     pub tool_name: String,
     pub arguments: Value,
+    /// Tenant slug extracted from the SMCP security token.
+    pub tenant_id: String,
 }
 
 pub fn verify_and_extract(
@@ -79,5 +85,6 @@ pub fn verify_and_extract(
         execution_id: claims.execution_id,
         tool_name: params.name,
         arguments: params.arguments,
+        tenant_id: claims.tenant_id,
     })
 }

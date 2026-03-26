@@ -13,6 +13,10 @@ use crate::infrastructure::config::GatewayConfig;
 #[derive(Debug, Clone, Deserialize)]
 struct JwtClaims {
     aegis_role: Option<String>,
+    /// Tenant slug from the operator's JWT (ADR-056).
+    /// Used to scope admin operations to the caller's tenant.
+    #[serde(default)]
+    tenant_id: Option<String>,
 }
 
 pub async fn require_operator(
@@ -35,12 +39,20 @@ pub async fn require_operator(
         .or_else(|| auth.strip_prefix("bearer "))
         .ok_or(StatusCode::UNAUTHORIZED)?;
 
-    verify_operator_token(&config, token)?;
+    let tenant_id = verify_operator_token(&config, token)?;
+
+    // Inject tenant context into request extensions for downstream handlers (ADR-056).
+    let mut request = request;
+    request.extensions_mut().insert(TenantContext(tenant_id));
 
     Ok(next.run(request).await)
 }
 
-pub fn verify_operator_token(config: &GatewayConfig, token: &str) -> Result<(), StatusCode> {
+/// Extracted tenant identity from an authenticated request (ADR-056).
+#[derive(Debug, Clone)]
+pub struct TenantContext(pub Option<String>);
+
+pub fn verify_operator_token(config: &GatewayConfig, token: &str) -> Result<Option<String>, StatusCode> {
     if config.operator_jwt_public_key_pem.trim().is_empty() {
         return Err(StatusCode::UNAUTHORIZED);
     }
@@ -64,5 +76,5 @@ pub fn verify_operator_token(config: &GatewayConfig, token: &str) -> Result<(), 
         return Err(StatusCode::FORBIDDEN);
     }
 
-    Ok(())
+    Ok(claims.tenant_id)
 }

@@ -534,6 +534,7 @@ pub async fn upsert_security_context(
                 allow_explorer: req.allow_explorer,
                 allow_human_delegated_credentials: req.allow_human_delegated_credentials,
             },
+            tenant_id: None, // TODO(ADR-056): Extract from request TenantContext extension
         })
         .await
         .map_err(error_response)?;

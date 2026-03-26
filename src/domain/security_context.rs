@@ -4,6 +4,10 @@ use serde::{Deserialize, Serialize};
 pub struct SecurityContext {
     pub name: String,
     pub capabilities: SecurityCapabilities,
+    /// Optional tenant slug that owns this security context (ADR-056).
+    /// `None` means the context is system-wide (available to all tenants).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tenant_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
