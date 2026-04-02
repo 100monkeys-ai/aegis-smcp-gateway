@@ -17,8 +17,8 @@ use application::{
     CliEngine, CredentialResolver, ExplorerService, InvocationService, SemanticGate, WorkflowEngine,
 };
 use domain::{
-    ApiSpecRepository, EphemeralCliToolRepository, SealSessionRecord, SealSessionRepository,
-    SecurityContextRepository, ToolWorkflowRepository,
+    ApiSpecRepository, EphemeralCliToolRepository, JtiRepository, SealSessionRecord,
+    SealSessionRepository, SecurityContextRepository, ToolWorkflowRepository,
 };
 use infrastructure::auth::require_operator;
 use infrastructure::config::GatewayConfig;
@@ -43,6 +43,7 @@ type RepositoryBundle = (
     Arc<dyn EphemeralCliToolRepository>,
     Arc<dyn SealSessionRepository>,
     Arc<dyn SecurityContextRepository>,
+    Arc<dyn JtiRepository>,
     Arc<dyn EventStore>,
 );
 
@@ -53,7 +54,7 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let config = GatewayConfig::load_or_default()?;
-    let (specs, workflows, cli_tools, seal_sessions, security_contexts, event_store): RepositoryBundle =
+    let (specs, workflows, cli_tools, seal_sessions, security_contexts, jti_repo, event_store): RepositoryBundle =
         if config.database_url.starts_with("postgres://")
             || config.database_url.starts_with("postgresql://")
         {
@@ -64,11 +65,13 @@ async fn main() -> anyhow::Result<()> {
                 Arc::new(store.clone()),
                 Arc::new(store.clone()),
                 Arc::new(store.clone()),
+                Arc::new(store.clone()),
                 Arc::new(store),
             )
         } else {
             let store = SqliteStore::new(&config.database_url).await?;
             (
+                Arc::new(store.clone()),
                 Arc::new(store.clone()),
                 Arc::new(store.clone()),
                 Arc::new(store.clone()),
@@ -129,6 +132,7 @@ async fn main() -> anyhow::Result<()> {
         cli_tools.clone(),
         seal_sessions.clone(),
         security_contexts.clone(),
+        jti_repo,
         config.clone(),
     );
 

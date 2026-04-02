@@ -9,12 +9,22 @@ use crate::domain::{SealEnvelope, SealToolCall, SealToolParams};
 use crate::infrastructure::errors::GatewayError;
 
 #[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)] // Fields deserialized from JWT; consumed as orchestrator alignment progresses
 struct SealClaims {
+    /// Execution ID — primary lookup key for sessions.
     execution_id: String,
-    /// Tenant slug embedded in the SEAL security token (ADR-056).
-    /// Empty string for pre-multi-tenancy tokens (treated as system tenant).
+    /// Tenant slug for multi-tenant routing.
     #[serde(default)]
     tenant_id: String,
+    /// JWT ID for replay detection (UUID v4).
+    #[serde(default)]
+    jti: Option<String>,
+    /// Security context name (spec alias for security_context).
+    #[serde(default)]
+    scp: Option<String>,
+    /// Workload/container ID (spec alias for container_id).
+    #[serde(default)]
+    wid: Option<String>,
 }
 
 #[allow(dead_code)] // Consumed once SEAL tool routing is wired end-to-end
@@ -24,6 +34,8 @@ pub struct SealVerifiedCall {
     pub arguments: Value,
     /// Tenant slug extracted from the SEAL security token.
     pub tenant_id: String,
+    /// JWT ID for replay detection.
+    pub jti: Option<String>,
 }
 
 pub fn verify_and_extract(
@@ -89,6 +101,7 @@ pub fn verify_and_extract(
         tool_name: params.name,
         arguments: params.arguments,
         tenant_id: claims.tenant_id,
+        jti: claims.jti,
     })
 }
 

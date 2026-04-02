@@ -5,9 +5,9 @@ use uuid::Uuid;
 
 use crate::domain::{
     ApiSpec, ApiSpecId, ApiSpecRepository, ApiSpecSummary, EphemeralCliTool,
-    EphemeralCliToolRepository, EphemeralCliToolSummary, SealSessionRecord, SealSessionRepository,
-    SecurityContext, SecurityContextRepository, ToolWorkflow, ToolWorkflowRepository,
-    ToolWorkflowSummary, WorkflowId,
+    EphemeralCliToolRepository, EphemeralCliToolSummary, JtiRepository, SealSessionRecord,
+    SealSessionRepository, SecurityContext, SecurityContextRepository, ToolWorkflow,
+    ToolWorkflowRepository, ToolWorkflowSummary, WorkflowId,
 };
 use crate::infrastructure::errors::GatewayError;
 use crate::infrastructure::persistence::EventStore;
@@ -450,5 +450,31 @@ impl SecurityContextRepository for PostgresStore {
                 })
             })
             .collect()
+    }
+}
+
+#[async_trait]
+impl JtiRepository for PostgresStore {
+    async fn record_jti(
+        &self,
+        jti: &str,
+        expires_at: chrono::DateTime<Utc>,
+    ) -> Result<bool, GatewayError> {
+        let result = sqlx::query(
+            "INSERT INTO seen_jtis (jti, expires_at) VALUES ($1, $2) ON CONFLICT (jti) DO NOTHING",
+        )
+        .bind(jti)
+        .bind(expires_at.to_rfc3339())
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected() > 0)
+    }
+
+    async fn cleanup_expired(&self) -> Result<u64, GatewayError> {
+        let result = sqlx::query("DELETE FROM seen_jtis WHERE expires_at < $1")
+            .bind(Utc::now().to_rfc3339())
+            .execute(&self.pool)
+            .await?;
+        Ok(result.rows_affected())
     }
 }

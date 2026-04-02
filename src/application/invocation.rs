@@ -6,7 +6,7 @@ use serde_json::Value;
 use crate::application::{CliEngine, CliFsalMount, CliInvocation, WorkflowEngine};
 use crate::domain::SealEnvelope;
 use crate::domain::{
-    EphemeralCliToolRepository, SealSessionRepository, SealSessionStatus,
+    EphemeralCliToolRepository, JtiRepository, SealSessionRepository, SealSessionStatus,
     SecurityContextRepository, ToolWorkflow, WorkflowId,
 };
 use crate::infrastructure::config::GatewayConfig;
@@ -20,6 +20,7 @@ pub struct InvocationService {
     cli_tools: Arc<dyn EphemeralCliToolRepository>,
     seal_sessions: Arc<dyn SealSessionRepository>,
     security_contexts: Arc<dyn SecurityContextRepository>,
+    jti_repo: Arc<dyn JtiRepository>,
     config: GatewayConfig,
 }
 
@@ -30,6 +31,7 @@ impl InvocationService {
         cli_tools: Arc<dyn EphemeralCliToolRepository>,
         seal_sessions: Arc<dyn SealSessionRepository>,
         security_contexts: Arc<dyn SecurityContextRepository>,
+        jti_repo: Arc<dyn JtiRepository>,
         config: GatewayConfig,
     ) -> Self {
         Self {
@@ -38,6 +40,7 @@ impl InvocationService {
             cli_tools,
             seal_sessions,
             security_contexts,
+            jti_repo,
             config,
         }
     }
@@ -66,6 +69,20 @@ impl InvocationService {
             &self.config.seal_jwt_issuer,
             &self.config.seal_jwt_audience,
         )?;
+
+        // JTI deduplication — reject replayed tokens (ADR-088 A7).
+        if let Some(ref jti) = call.jti {
+            let jti_expiry = session
+                .expires_at
+                .min(chrono::Utc::now() + chrono::Duration::hours(1));
+            let is_new = self.jti_repo.record_jti(jti, jti_expiry).await?;
+            if !is_new {
+                return Err(GatewayError::Seal(
+                    "duplicate JTI — replay detected".to_string(),
+                ));
+            }
+        }
+
         if call.execution_id != session.execution_id {
             return Err(GatewayError::Unauthorized);
         }

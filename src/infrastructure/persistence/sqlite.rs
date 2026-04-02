@@ -7,9 +7,9 @@ use uuid::Uuid;
 
 use crate::domain::{
     ApiSpec, ApiSpecId, ApiSpecRepository, ApiSpecSummary, EphemeralCliTool,
-    EphemeralCliToolRepository, EphemeralCliToolSummary, SealSessionRecord, SealSessionRepository,
-    SecurityContext, SecurityContextRepository, ToolWorkflow, ToolWorkflowRepository,
-    ToolWorkflowSummary, WorkflowId,
+    EphemeralCliToolRepository, EphemeralCliToolSummary, JtiRepository, SealSessionRecord,
+    SealSessionRepository, SecurityContext, SecurityContextRepository, ToolWorkflow,
+    ToolWorkflowRepository, ToolWorkflowSummary, WorkflowId,
 };
 use crate::infrastructure::errors::GatewayError;
 use crate::infrastructure::persistence::EventStore;
@@ -436,5 +436,29 @@ impl SecurityContextRepository for SqliteStore {
                 })
             })
             .collect()
+    }
+}
+
+#[async_trait]
+impl JtiRepository for SqliteStore {
+    async fn record_jti(
+        &self,
+        jti: &str,
+        expires_at: chrono::DateTime<Utc>,
+    ) -> Result<bool, GatewayError> {
+        let result = sqlx::query("INSERT OR IGNORE INTO seen_jtis (jti, expires_at) VALUES (?, ?)")
+            .bind(jti)
+            .bind(expires_at.to_rfc3339())
+            .execute(&self.pool)
+            .await?;
+        Ok(result.rows_affected() > 0)
+    }
+
+    async fn cleanup_expired(&self) -> Result<u64, GatewayError> {
+        let result = sqlx::query("DELETE FROM seen_jtis WHERE expires_at < ?")
+            .bind(Utc::now().to_rfc3339())
+            .execute(&self.pool)
+            .await?;
+        Ok(result.rows_affected())
     }
 }

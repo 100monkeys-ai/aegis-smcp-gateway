@@ -51,6 +51,17 @@ pub trait SecurityContextRepository: Send + Sync {
     async fn list_all(&self) -> Result<Vec<SecurityContext>, GatewayError>;
 }
 
+#[async_trait]
+pub trait JtiRepository: Send + Sync {
+    /// Record a JTI. Returns `true` if this is the first time seeing it.
+    /// Returns `false` if it's a duplicate (replay).
+    async fn record_jti(&self, jti: &str, expires_at: DateTime<Utc>) -> Result<bool, GatewayError>;
+
+    /// Remove expired JTI entries (called by periodic maintenance).
+    #[allow(dead_code)]
+    async fn cleanup_expired(&self) -> Result<u64, GatewayError>;
+}
+
 #[derive(Debug, Clone)]
 pub struct SealSessionRecord {
     pub execution_id: String,

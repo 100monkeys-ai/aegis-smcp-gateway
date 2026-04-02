@@ -46,6 +46,11 @@ CREATE TABLE IF NOT EXISTS security_contexts (
   deny_list TEXT NOT NULL DEFAULT '[]'
 );
 
+CREATE TABLE IF NOT EXISTS seen_jtis (
+  jti TEXT PRIMARY KEY,
+  expires_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS gateway_events (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   event_type TEXT NOT NULL,
