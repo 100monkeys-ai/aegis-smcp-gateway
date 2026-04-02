@@ -374,28 +374,48 @@ impl SealSessionRepository for PostgresStore {
         .fetch_optional(&self.pool)
         .await?;
 
-        row.map(|record| {
-            Ok(SealSessionRecord {
-                execution_id: record.try_get("execution_id")?,
-                agent_id: record.try_get("agent_id")?,
-                security_context: record.try_get("security_context")?,
-                public_key_b64: record.try_get("public_key_b64")?,
-                security_token: record.try_get("security_token")?,
-                session_status: serde_json::from_str(
-                    &record.try_get::<String, _>("session_status")?,
-                )?,
-                expires_at: chrono::DateTime::parse_from_rfc3339(
-                    &record.try_get::<String, _>("expires_at")?,
-                )
-                .map_err(|e| GatewayError::Serialization(e.to_string()))?
-                .with_timezone(&Utc),
-                allowed_tool_patterns: serde_json::from_str(
-                    &record.try_get::<String, _>("allowed_tool_patterns")?,
-                )?,
-            })
-        })
-        .transpose()
+        row.map(seal_session_from_pg_row).transpose()
     }
+
+    async fn list_active(&self) -> Result<Vec<SealSessionRecord>, GatewayError> {
+        let rows = sqlx::query(
+            "SELECT execution_id,agent_id,security_context,public_key_b64,security_token,session_status,expires_at,allowed_tool_patterns FROM seal_sessions WHERE session_status='\"Active\"'",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        rows.into_iter().map(seal_session_from_pg_row).collect()
+    }
+
+    async fn delete_by_execution_id(&self, execution_id: &str) -> Result<bool, GatewayError> {
+        let result = sqlx::query(
+            "UPDATE seal_sessions SET session_status='\"Revoked\"' WHERE execution_id=$1 AND session_status='\"Active\"'",
+        )
+        .bind(execution_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected() > 0)
+    }
+}
+
+fn seal_session_from_pg_row(
+    record: sqlx::postgres::PgRow,
+) -> Result<SealSessionRecord, GatewayError> {
+    Ok(SealSessionRecord {
+        execution_id: record.try_get("execution_id")?,
+        agent_id: record.try_get("agent_id")?,
+        security_context: record.try_get("security_context")?,
+        public_key_b64: record.try_get("public_key_b64")?,
+        security_token: record.try_get("security_token")?,
+        session_status: serde_json::from_str(&record.try_get::<String, _>("session_status")?)?,
+        expires_at: chrono::DateTime::parse_from_rfc3339(
+            &record.try_get::<String, _>("expires_at")?,
+        )
+        .map_err(|e| GatewayError::Serialization(e.to_string()))?
+        .with_timezone(&Utc),
+        allowed_tool_patterns: serde_json::from_str(
+            &record.try_get::<String, _>("allowed_tool_patterns")?,
+        )?,
+    })
 }
 
 #[async_trait]

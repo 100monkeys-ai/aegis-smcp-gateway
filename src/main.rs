@@ -160,7 +160,14 @@ async fn main() -> anyhow::Result<()> {
         )
         .route("/v1/cli-tools", post(register_cli_tool).get(list_cli_tools))
         .route("/v1/cli-tools/{name}", delete(delete_cli_tool))
-        .route("/v1/seal/sessions", post(upsert_seal_session))
+        .route(
+            "/v1/seal/sessions",
+            post(upsert_seal_session).get(list_seal_sessions),
+        )
+        .route(
+            "/v1/seal/sessions/{execution_id}",
+            get(get_seal_session).delete(delete_seal_session),
+        )
         .route(
             "/v1/security-contexts",
             post(upsert_security_context).get(list_security_contexts),

@@ -520,6 +520,86 @@ pub async fn upsert_seal_session(
     Ok(Json(json!({"saved": true})))
 }
 
+#[utoipa::path(
+    get,
+    path = "/v1/seal/sessions",
+    tag = "SEAL Sessions",
+    responses(
+        (status = 200, description = "List of active sessions"),
+        (status = 401, description = "Unauthorized"),
+    ),
+    security(("bearer_jwt" = [])),
+)]
+pub async fn list_seal_sessions(
+    State(state): State<AppState>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let sessions = state
+        .seal_sessions
+        .list_active()
+        .await
+        .map_err(error_response)?;
+    Ok(Json(json!(sessions)))
+}
+
+#[utoipa::path(
+    get,
+    path = "/v1/seal/sessions/{execution_id}",
+    tag = "SEAL Sessions",
+    params(("execution_id" = String, Path, description = "Execution ID")),
+    responses(
+        (status = 200, description = "Session details"),
+        (status = 404, description = "Not found"),
+        (status = 401, description = "Unauthorized"),
+    ),
+    security(("bearer_jwt" = [])),
+)]
+pub async fn get_seal_session(
+    State(state): State<AppState>,
+    Path(execution_id): Path<String>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let session = state
+        .seal_sessions
+        .find_by_execution_id(&execution_id)
+        .await
+        .map_err(error_response)?;
+    match session {
+        Some(s) => Ok(Json(json!(s))),
+        None => Err(error_response(GatewayError::NotFound(
+            "session not found".to_string(),
+        ))),
+    }
+}
+
+#[utoipa::path(
+    delete,
+    path = "/v1/seal/sessions/{execution_id}",
+    tag = "SEAL Sessions",
+    params(("execution_id" = String, Path, description = "Execution ID")),
+    responses(
+        (status = 200, description = "Session revoked"),
+        (status = 404, description = "Not found"),
+        (status = 401, description = "Unauthorized"),
+    ),
+    security(("bearer_jwt" = [])),
+)]
+pub async fn delete_seal_session(
+    State(state): State<AppState>,
+    Path(execution_id): Path<String>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let revoked = state
+        .seal_sessions
+        .delete_by_execution_id(&execution_id)
+        .await
+        .map_err(error_response)?;
+    if revoked {
+        Ok(Json(json!({"status": "revoked"})))
+    } else {
+        Err(error_response(GatewayError::NotFound(
+            "session not found or already revoked".to_string(),
+        )))
+    }
+}
+
 #[derive(Deserialize, utoipa::ToSchema)]
 pub struct UpsertSecurityContextRequest {
     pub name: String,

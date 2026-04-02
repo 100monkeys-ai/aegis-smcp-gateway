@@ -42,6 +42,8 @@ pub trait SealSessionRepository: Send + Sync {
         &self,
         execution_id: &str,
     ) -> Result<Option<SealSessionRecord>, GatewayError>;
+    async fn list_active(&self) -> Result<Vec<SealSessionRecord>, GatewayError>;
+    async fn delete_by_execution_id(&self, execution_id: &str) -> Result<bool, GatewayError>;
 }
 
 #[async_trait]
@@ -62,7 +64,7 @@ pub trait JtiRepository: Send + Sync {
     async fn cleanup_expired(&self) -> Result<u64, GatewayError>;
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct SealSessionRecord {
     pub execution_id: String,
     pub agent_id: String,
