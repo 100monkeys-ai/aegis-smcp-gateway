@@ -1,4 +1,4 @@
-CREATE TABLE IF NOT EXISTS api_specs (
+CREATE TABLE api_specs (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL UNIQUE,
   base_url TEXT NOT NULL,
@@ -9,7 +9,7 @@ CREATE TABLE IF NOT EXISTS api_specs (
   created_at TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS workflows (
+CREATE TABLE workflows (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL UNIQUE,
   description TEXT NOT NULL,
@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS workflows (
   created_at TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS cli_tools (
+CREATE TABLE cli_tools (
   name TEXT PRIMARY KEY,
   description TEXT NOT NULL,
   docker_image TEXT NOT NULL,
@@ -29,7 +29,7 @@ CREATE TABLE IF NOT EXISTS cli_tools (
   registry_credential_path TEXT
 );
 
-CREATE TABLE IF NOT EXISTS seal_sessions (
+CREATE TABLE seal_sessions (
   execution_id TEXT PRIMARY KEY,
   agent_id TEXT NOT NULL,
   security_context TEXT NOT NULL,
@@ -40,27 +40,21 @@ CREATE TABLE IF NOT EXISTS seal_sessions (
   allowed_tool_patterns TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS security_contexts (
+CREATE TABLE security_contexts (
   name TEXT PRIMARY KEY,
   capabilities TEXT NOT NULL,
   deny_list TEXT NOT NULL DEFAULT '[]',
   description TEXT NOT NULL DEFAULT ''
 );
 
-CREATE TABLE IF NOT EXISTS seen_jtis (
+CREATE TABLE seen_jtis (
   jti TEXT PRIMARY KEY,
   expires_at TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS gateway_events (
+CREATE TABLE gateway_events (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   event_type TEXT NOT NULL,
   payload TEXT NOT NULL,
   created_at TEXT NOT NULL
 );
-
--- Schema evolution: idempotent column additions for databases created before these columns existed.
--- SQLite 3.37+ supports ADD COLUMN IF NOT EXISTS.
-ALTER TABLE workflows ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT '';
-ALTER TABLE cli_tools ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT '';
-ALTER TABLE security_contexts ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT '';

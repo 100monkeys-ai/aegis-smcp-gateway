@@ -20,9 +20,10 @@ pub struct PostgresStore {
 impl PostgresStore {
     pub async fn new(database_url: &str) -> Result<Self, GatewayError> {
         let pool = sqlx::PgPool::connect(database_url).await?;
-        sqlx::query(include_str!("schema_postgres.sql"))
-            .execute(&pool)
-            .await?;
+        sqlx::migrate!("./migrations")
+            .run(&pool)
+            .await
+            .map_err(|e| GatewayError::Database(e.to_string()))?;
         Ok(Self { pool })
     }
 }
