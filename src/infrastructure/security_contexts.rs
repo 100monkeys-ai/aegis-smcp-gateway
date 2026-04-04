@@ -3,7 +3,7 @@ use crate::domain::{Capability, SecurityContext};
 pub fn default_security_contexts() -> Vec<SecurityContext> {
     vec![
         SecurityContext {
-            name: "default".to_string(),
+            name: "aegis-system-default".to_string(),
             capabilities: vec![Capability {
                 tool_pattern: "*".to_string(),
                 path_allowlist: None,

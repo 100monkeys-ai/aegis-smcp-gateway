@@ -92,7 +92,7 @@ async fn main() -> anyhow::Result<()> {
             .save(SealSessionRecord {
                 execution_id: "dev-execution".to_string(),
                 agent_id: "dev-agent".to_string(),
-                security_context: "default".to_string(),
+                security_context: "aegis-system-default".to_string(),
                 public_key_b64: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=".to_string(),
                 security_token: "dev".to_string(),
                 session_status: domain::SealSessionStatus::Active,

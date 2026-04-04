@@ -226,7 +226,7 @@ impl Capability {
 /// Named permission boundary for agent MCP tool access (BC-4, ADR-035).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SecurityContext {
-    /// Unique name identifying this context (e.g. `"default"`, `"zaru-free"`).
+    /// Unique name identifying this context (e.g. `"aegis-system-default"`, `"zaru-free"`).
     pub name: String,
     /// Permitted tool capabilities. Evaluated in order; first match wins.
     pub capabilities: Vec<Capability>,
