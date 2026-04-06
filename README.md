@@ -68,7 +68,8 @@ spec:
     url: "sqlite://gateway.db"
   auth:
     disabled: false
-    operator_jwt_public_key_pem: ""
+    operator_jwks_uri: "https://auth.example.com/realms/aegis/protocol/openid-connect/certs"
+    jwks_cache_ttl_secs: 300
     operator_jwt_issuer: "aegis-keycloak"
     operator_jwt_audience: "aegis-seal-gateway"
     seal_jwt_public_key_pem: ""
@@ -95,7 +96,10 @@ spec:
 - `SEAL_GATEWAY_BIND` (default: `0.0.0.0:8089`)
 - `SEAL_GATEWAY_GRPC_BIND` (default: `0.0.0.0:50055`)
 - `SEAL_GATEWAY_DB` (default: `sqlite://gateway.db`)
-- `SEAL_GATEWAY_OPERATOR_JWT_PUBLIC_KEY_PEM` (required unless `SEAL_GATEWAY_AUTH_DISABLED=true`)
+- `SEAL_GATEWAY_OPERATOR_JWKS_URI` — Keycloak JWKS endpoint URL for operator JWT
+  validation (required when auth enabled)
+- `SEAL_GATEWAY_JWKS_CACHE_TTL_SECS` — JWKS cache TTL in seconds
+  (optional, default: 300)
 - `SEAL_GATEWAY_OPERATOR_JWT_ISSUER` (default: `aegis-keycloak`)
 - `SEAL_GATEWAY_OPERATOR_JWT_AUDIENCE` (default: `aegis-seal-gateway`)
 - `SEAL_GATEWAY_SEAL_JWT_PUBLIC_KEY_PEM` (required)
