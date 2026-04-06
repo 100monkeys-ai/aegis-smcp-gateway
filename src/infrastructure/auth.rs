@@ -66,7 +66,7 @@ pub async fn inject_seal_tenant_context(
         .and_then(|v| {
             v.get("security_token")
                 .and_then(|t| t.as_str())
-                .and_then(|token| decode_jwt_tenant_id_unverified(token))
+                .and_then(decode_jwt_tenant_id_unverified)
         });
 
     let mut request = Request::from_parts(parts, Body::from(bytes));
