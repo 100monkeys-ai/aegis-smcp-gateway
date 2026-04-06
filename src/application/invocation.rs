@@ -11,6 +11,7 @@ use crate::domain::{
 };
 use crate::infrastructure::config::GatewayConfig;
 use crate::infrastructure::errors::GatewayError;
+use crate::infrastructure::persistence::EventStore;
 use crate::infrastructure::seal::verify_and_extract;
 
 #[derive(Clone)]
@@ -21,6 +22,7 @@ pub struct InvocationService {
     seal_sessions: Arc<dyn SealSessionRepository>,
     security_contexts: Arc<dyn SecurityContextRepository>,
     jti_repo: Arc<dyn JtiRepository>,
+    event_store: Arc<dyn EventStore>,
     config: GatewayConfig,
 }
 
@@ -32,6 +34,7 @@ impl InvocationService {
         seal_sessions: Arc<dyn SealSessionRepository>,
         security_contexts: Arc<dyn SecurityContextRepository>,
         jti_repo: Arc<dyn JtiRepository>,
+        event_store: Arc<dyn EventStore>,
         config: GatewayConfig,
     ) -> Self {
         Self {
@@ -41,6 +44,7 @@ impl InvocationService {
             seal_sessions,
             security_contexts,
             jti_repo,
+            event_store,
             config,
         }
     }
@@ -125,6 +129,23 @@ impl InvocationService {
 
         // Evaluate the security context against the tool call (ADR-088 A1)
         security_context.evaluate(&call.tool_name, &call.arguments)?;
+
+        // Publish ToolCallAuthorized event (Gap 035-7)
+        if let Ok(event_val) =
+            serde_json::to_value(crate::domain::GatewayEvent::ToolCallAuthorized {
+                execution_id: call.exec_id.clone(),
+                agent_id: call.sub.clone(),
+                tool_name: call.tool_name.clone(),
+                security_context: call.scp.clone(),
+                tenant_id: call.tenant_id.clone(),
+                authorized_at: chrono::Utc::now(),
+            })
+        {
+            let _ = self
+                .event_store
+                .append_event("ToolCallAuthorized", &event_val)
+                .await;
+        }
 
         let allow_human_delegated = security_context.allows_human_delegated_credentials();
 

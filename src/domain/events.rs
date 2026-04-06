@@ -98,4 +98,12 @@ pub enum GatewayEvent {
         reason: String,
         failed_at: DateTime<Utc>,
     },
+    ToolCallAuthorized {
+        execution_id: String,
+        agent_id: String,
+        tool_name: String,
+        security_context: String,
+        tenant_id: String,
+        authorized_at: DateTime<Utc>,
+    },
 }

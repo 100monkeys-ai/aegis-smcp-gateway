@@ -1,3 +1,4 @@
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
@@ -8,8 +9,11 @@ pub struct SealEnvelope {
     pub signature: String,
     /// MCP JSON-RPC payload.
     pub payload: serde_json::Value,
-    /// ISO-8601 UTC timestamp for replay prevention.
-    pub timestamp: String,
+    /// Container / workload ID for correlation.
+    pub container_id: Option<String>,
+    /// Unix epoch UTC timestamp for replay prevention.
+    #[serde(with = "chrono::serde::ts_seconds")]
+    pub timestamp: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
