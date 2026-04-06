@@ -8,6 +8,7 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 // ── PolicyViolation ──
@@ -29,6 +30,22 @@ pub enum PolicyViolation {
     DomainNotAllowed {
         domain: String,
         allowed_domains: Vec<String>,
+    },
+    CommandNotAllowed {
+        command: String,
+        allowed_commands: Vec<String>,
+    },
+    SubcommandNotAllowed {
+        base_command: String,
+        subcommand: String,
+        allowed_subcommands: Vec<String>,
+    },
+    ConcurrentExecLimitExceeded {
+        limit: u32,
+    },
+    OutputSizeLimitExceeded {
+        actual_bytes: u64,
+        max_bytes: u64,
     },
 }
 
@@ -63,6 +80,34 @@ impl std::fmt::Display for PolicyViolation {
                 "domain '{}' not in allowed domains {:?}",
                 domain, allowed_domains
             ),
+            PolicyViolation::CommandNotAllowed {
+                command,
+                allowed_commands,
+            } => write!(
+                f,
+                "command '{}' not allowed; allowed: {:?}",
+                command, allowed_commands
+            ),
+            PolicyViolation::SubcommandNotAllowed {
+                base_command,
+                subcommand,
+                allowed_subcommands,
+            } => write!(
+                f,
+                "subcommand '{}' not allowed for '{}'; allowed: {:?}",
+                subcommand, base_command, allowed_subcommands
+            ),
+            PolicyViolation::ConcurrentExecLimitExceeded { limit } => {
+                write!(f, "concurrent execution limit of {} exceeded", limit)
+            }
+            PolicyViolation::OutputSizeLimitExceeded {
+                actual_bytes,
+                max_bytes,
+            } => write!(
+                f,
+                "output size {} bytes exceeds limit of {} bytes",
+                actual_bytes, max_bytes
+            ),
         }
     }
 }
@@ -95,8 +140,8 @@ pub struct Capability {
     /// If set, `cmd.run` tool calls must use a command whose base executable name
     /// is in this list.
     pub command_allowlist: Option<Vec<String>>,
-    /// If set, `cmd.run` tool calls must have the subcommand in this list.
-    pub subcommand_allowlist: Option<Vec<String>>,
+    /// If set, `cmd.run` tool calls must have the subcommand in the mapped Vec for the base command.
+    pub subcommand_allowlist: Option<HashMap<String, Vec<String>>>,
     /// If set, `web.*` tool calls must target a URL whose domain suffix matches
     /// one of these entries.
     pub domain_allowlist: Option<Vec<String>>,
@@ -143,31 +188,45 @@ impl Capability {
         if tool_name == "cmd.run" {
             if let Some(cmd) = args.get("command").and_then(|c| c.as_str()) {
                 let cmd_parts: Vec<&str> = cmd.split_whitespace().collect();
-                let cmd_base = cmd_parts.first().unwrap_or(&"");
+                let cmd_base = cmd_parts.first().copied().unwrap_or("");
+                let subcommand = cmd_parts.get(1).copied();
 
                 if let Some(ref allowlist) = self.command_allowlist {
                     if !allowlist.contains(&cmd_base.to_string()) {
-                        return Err(PolicyViolation::ToolNotAllowed {
-                            tool_name: format!("cmd.run (command: {cmd})"),
-                            allowed_tools: allowlist.clone(),
+                        return Err(PolicyViolation::CommandNotAllowed {
+                            command: cmd_base.to_string(),
+                            allowed_commands: allowlist.clone(),
                         });
                     }
                 }
 
-                if let Some(ref sub_allowlist) = self.subcommand_allowlist {
-                    if cmd_parts.len() > 1 {
-                        let subcommand = cmd_parts[1];
-                        if !sub_allowlist.contains(&subcommand.to_string()) {
-                            return Err(PolicyViolation::ToolNotAllowed {
-                                tool_name: format!("cmd.run (subcommand: {subcommand})"),
-                                allowed_tools: sub_allowlist.clone(),
-                            });
-                        }
-                    } else if !sub_allowlist.is_empty() {
-                        return Err(PolicyViolation::ToolNotAllowed {
-                            tool_name: format!("cmd.run (missing subcommand: {cmd})"),
-                            allowed_tools: sub_allowlist.clone(),
+                if let Some(ref sub_map) = self.subcommand_allowlist {
+                    if !sub_map.contains_key(cmd_base) {
+                        return Err(PolicyViolation::CommandNotAllowed {
+                            command: cmd_base.to_string(),
+                            allowed_commands: sub_map.keys().cloned().collect(),
                         });
+                    }
+                    let allowed_subs = &sub_map[cmd_base];
+                    if !allowed_subs.is_empty() {
+                        match subcommand {
+                            Some(sub) => {
+                                if !allowed_subs.contains(&sub.to_string()) {
+                                    return Err(PolicyViolation::SubcommandNotAllowed {
+                                        base_command: cmd_base.to_string(),
+                                        subcommand: sub.to_string(),
+                                        allowed_subcommands: allowed_subs.clone(),
+                                    });
+                                }
+                            }
+                            None => {
+                                return Err(PolicyViolation::SubcommandNotAllowed {
+                                    base_command: cmd_base.to_string(),
+                                    subcommand: String::new(),
+                                    allowed_subcommands: allowed_subs.clone(),
+                                });
+                            }
+                        }
                     }
                 }
             }
@@ -340,8 +399,11 @@ mod tests {
         let cap = Capability {
             tool_pattern: "cmd.run".to_string(),
             path_allowlist: None,
-            command_allowlist: Some(vec!["cargo".to_string()]),
-            subcommand_allowlist: Some(vec!["build".to_string(), "check".to_string()]),
+            command_allowlist: None,
+            subcommand_allowlist: Some(HashMap::from([(
+                "cargo".to_string(),
+                vec!["build".to_string(), "check".to_string()],
+            )])),
             domain_allowlist: None,
             max_response_size: None,
             rate_limit: None,
@@ -352,13 +414,21 @@ mod tests {
         assert!(cap
             .allows("cmd.run", &json!({"command": "cargo check"}))
             .is_ok());
-        assert!(cap
-            .allows("cmd.run", &json!({"command": "npm install"}))
-            .is_err());
-        assert!(cap
-            .allows("cmd.run", &json!({"command": "cargo publish"}))
-            .is_err());
-        assert!(cap.allows("cmd.run", &json!({"command": "cargo"})).is_err());
+        // npm is not a key in the subcommand_allowlist map
+        assert!(matches!(
+            cap.allows("cmd.run", &json!({"command": "npm install"})),
+            Err(PolicyViolation::CommandNotAllowed { .. })
+        ));
+        // cargo publish — cargo is a valid key but publish is not in the allowed subs
+        assert!(matches!(
+            cap.allows("cmd.run", &json!({"command": "cargo publish"})),
+            Err(PolicyViolation::SubcommandNotAllowed { .. })
+        ));
+        // cargo with no subcommand
+        assert!(matches!(
+            cap.allows("cmd.run", &json!({"command": "cargo"})),
+            Err(PolicyViolation::SubcommandNotAllowed { .. })
+        ));
     }
 
     #[test]

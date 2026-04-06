@@ -124,20 +124,17 @@ fn signed_message(envelope: &SealEnvelope) -> Result<Vec<u8>, GatewayError> {
             envelope.protocol
         )));
     }
-    let timestamp = parse_iso8601_timestamp(&envelope.timestamp)?;
-    let age_seconds = (Utc::now() - timestamp).num_seconds().abs();
+    let age_seconds = (Utc::now() - envelope.timestamp).num_seconds().abs();
     if age_seconds > 30 {
         return Err(GatewayError::Seal(format!(
             "envelope timestamp is outside the 30 second freshness window ({age_seconds}s)"
         )));
     }
-    canonical_message(&envelope.security_token, &envelope.payload, timestamp)
-}
-
-fn parse_iso8601_timestamp(input: &str) -> Result<DateTime<Utc>, GatewayError> {
-    DateTime::parse_from_rfc3339(input)
-        .map(|ts| ts.with_timezone(&Utc))
-        .map_err(|e| GatewayError::Seal(format!("invalid SEAL timestamp '{input}': {e}")))
+    canonical_message(
+        &envelope.security_token,
+        &envelope.payload,
+        envelope.timestamp,
+    )
 }
 
 fn canonical_message(

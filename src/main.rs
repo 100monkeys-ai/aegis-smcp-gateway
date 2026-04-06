@@ -147,6 +147,7 @@ async fn main() -> anyhow::Result<()> {
         seal_sessions.clone(),
         security_contexts.clone(),
         jti_repo,
+        event_store.clone(),
         config.clone(),
     );
 
