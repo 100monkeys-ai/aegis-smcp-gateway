@@ -493,8 +493,6 @@ mod tests {
             bind_addr: "127.0.0.1:8089".to_string(),
             grpc_bind_addr: "127.0.0.1:50055".to_string(),
             database_url: "sqlite::memory:".to_string(),
-            operator_jwks_uri: String::new(),
-            jwks_cache_ttl_secs: 300,
             jwks_validator: std::sync::Arc::new(
                 crate::infrastructure::jwks_validator::JwksValidator::new(String::new(), 300),
             ),
