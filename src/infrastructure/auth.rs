@@ -17,6 +17,8 @@ pub async fn require_operator(
     next: Next,
 ) -> Result<Response, StatusCode> {
     if app_state.config.auth_disabled {
+        let mut request = request;
+        request.extensions_mut().insert(TenantContext(None));
         return Ok(next.run(request).await);
     }
 
