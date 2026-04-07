@@ -491,12 +491,12 @@ impl CredentialResolver {
         // `credential_grants` encodes which agents (or all agents) may use the binding.
         // The gateway trusts that the orchestrator's grant check was already enforced
         // at invocation time; here we only enforce user ownership and provider match.
+        #[derive(sqlx::FromRow)]
         struct BindingRow {
             secret_path: String,
         }
 
-        let row: Option<BindingRow> = sqlx::query_as!(
-            BindingRow,
+        let row: Option<BindingRow> = sqlx::query_as::<_, BindingRow>(
             r#"
             SELECT cb.secret_path
               FROM credential_bindings cb
@@ -510,10 +510,10 @@ impl CredentialResolver {
                )
              LIMIT 1
             "#,
-            user_id,
-            provider,
-            tenant_id.unwrap_or(""),
         )
+        .bind(user_id)
+        .bind(provider)
+        .bind(tenant_id.unwrap_or(""))
         .fetch_optional(pool)
         .await
         .map_err(|e| GatewayError::Database(e.to_string()))?;

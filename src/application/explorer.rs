@@ -71,6 +71,7 @@ impl ExplorerService {
             crate::domain::CredentialResolutionPath::HumanDelegated { .. } => "human_delegated",
             crate::domain::CredentialResolutionPath::Auto { .. } => "auto",
             crate::domain::CredentialResolutionPath::StaticRef(_) => "static_ref",
+            crate::domain::CredentialResolutionPath::UserBound { .. } => "user_bound",
         };
         let target_service = match &spec.credential_path {
             crate::domain::CredentialResolutionPath::HumanDelegated { target_service }
