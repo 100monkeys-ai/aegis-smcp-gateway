@@ -55,11 +55,14 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let config = GatewayConfig::load_or_default()?;
+    let mut credential_pg_pool: Option<sqlx::PgPool> = None;
     let (specs, workflows, cli_tools, seal_sessions, security_contexts, jti_repo, event_store): RepositoryBundle =
         if config.database_url.starts_with("postgres://")
             || config.database_url.starts_with("postgresql://")
         {
             let store = PostgresStore::new(&config.database_url).await?;
+            // Expose the pool to CredentialResolver for UserBound resolution.
+            credential_pg_pool = Some(sqlx::PgPool::connect(&config.database_url).await?);
             (
                 Arc::new(store.clone()),
                 Arc::new(store.clone()),
@@ -119,7 +122,7 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let http_client = HttpClient::new()?;
-    let credential_resolver = CredentialResolver::new(config.clone());
+    let credential_resolver = CredentialResolver::new(config.clone(), credential_pg_pool);
     let semantic_gate = SemanticGate::new(config.semantic_judge_url.clone());
 
     let workflow_engine = WorkflowEngine::new(

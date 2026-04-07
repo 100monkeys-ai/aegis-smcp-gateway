@@ -108,4 +108,10 @@ pub enum CredentialResolutionPath {
         target_service: String,
     },
     StaticRef(CredentialRef),
+    UserBound {
+        /// Matches the provider string stored in `credential_bindings.provider`
+        /// (e.g. `"github"`, `"openai"`). Uses `String` to avoid depending on
+        /// orchestrator domain types.
+        provider: String,
+    },
 }

@@ -103,6 +103,7 @@ impl WorkflowEngine {
             CredentialResolutionPath::HumanDelegated { .. } => "human_delegated",
             CredentialResolutionPath::Auto { .. } => "auto",
             CredentialResolutionPath::StaticRef(_) => "static_ref",
+            CredentialResolutionPath::UserBound { .. } => "user_bound",
         };
         let target_service = target_service_from_credential_path(&resolved_credential_path);
         let credential_headers = match self
@@ -336,6 +337,7 @@ fn target_service_from_credential_path(path: &CredentialResolutionPath) -> Strin
     match path {
         CredentialResolutionPath::HumanDelegated { target_service }
         | CredentialResolutionPath::Auto { target_service, .. } => target_service.clone(),
+        CredentialResolutionPath::UserBound { provider } => provider.clone(),
         _ => "unknown".to_string(),
     }
 }
@@ -387,5 +389,27 @@ mod tests {
             }
             _ => panic!("expected HumanDelegated"),
         }
+    }
+
+    #[test]
+    fn user_bound_passes_through_unchanged() {
+        let path = CredentialResolutionPath::UserBound {
+            provider: "github".to_string(),
+        };
+        // UserBound is opaque to resolve_credential_path_for_session — it is
+        // handled entirely inside CredentialResolver::resolve_user_bound.
+        let resolved = resolve_credential_path_for_session(&path, Some("token"), true).unwrap();
+        assert!(
+            matches!(resolved, CredentialResolutionPath::UserBound { provider } if provider == "github")
+        );
+    }
+
+    #[test]
+    fn user_bound_target_service_is_provider() {
+        let path = CredentialResolutionPath::UserBound {
+            provider: "openai".to_string(),
+        };
+        let label = target_service_from_credential_path(&path);
+        assert_eq!(label, "openai");
     }
 }

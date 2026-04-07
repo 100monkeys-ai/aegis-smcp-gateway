@@ -9,6 +9,10 @@ use crate::infrastructure::errors::GatewayError;
 pub struct CredentialResolver {
     config: GatewayConfig,
     http_client: reqwest::Client,
+    /// Postgres pool used exclusively by `UserBound` resolution to query
+    /// `credential_bindings` and `credential_grants`.  `None` when the
+    /// gateway is configured with SQLite (no user-bound credentials possible).
+    pool: Option<sqlx::PgPool>,
 }
 
 #[derive(Clone)]
@@ -39,10 +43,11 @@ struct KeycloakTokenExchangeResponse {
 }
 
 impl CredentialResolver {
-    pub fn new(config: GatewayConfig) -> Self {
+    pub fn new(config: GatewayConfig, pool: Option<sqlx::PgPool>) -> Self {
         Self {
             config,
             http_client: reqwest::Client::new(),
+            pool,
         }
     }
 
@@ -80,6 +85,23 @@ impl CredentialResolver {
             }
             CredentialResolutionPath::StaticRef(reference) => {
                 self.resolve_static_ref(&reference.key).await
+            }
+            CredentialResolutionPath::UserBound { provider } => {
+                let result = self
+                    .resolve_user_bound(provider, zaru_user_token, tenant_id)
+                    .await?;
+                if result.is_empty() {
+                    // No active user binding found — fall back to HumanDelegated if a
+                    // user token is present, then SystemJit if configured.
+                    if zaru_user_token.is_some() {
+                        self.resolve_human_delegated(provider, zaru_user_token)
+                            .await
+                    } else {
+                        Err(GatewayError::Unauthorized)
+                    }
+                } else {
+                    Ok(result)
+                }
             }
         }
     }
@@ -253,6 +275,37 @@ impl CredentialResolver {
                         .await
                 }
             }
+            // UserBound credentials are key/value pairs, not registry credentials.
+            // Resolve the raw credential fields and interpret them as registry credentials.
+            CredentialResolutionPath::UserBound { provider } => {
+                let headers = self
+                    .resolve_user_bound(provider, zaru_user_token, tenant_id)
+                    .await?;
+                if headers.is_empty() {
+                    return Err(GatewayError::Unauthorized);
+                }
+                // UserBound registry credentials surface the token as the password.
+                let token = headers
+                    .into_iter()
+                    .find(|(name, _)| name.eq_ignore_ascii_case("authorization"))
+                    .ok_or_else(|| {
+                        GatewayError::Serialization(
+                            "user-bound credential missing authorization header".to_string(),
+                        )
+                    })?;
+                let token_value = token
+                    .1
+                    .expose()
+                    .strip_prefix("Bearer ")
+                    .or_else(|| token.1.expose().strip_prefix("bearer "))
+                    .map(ToString::to_string)
+                    .unwrap_or_else(|| token.1.expose().to_string());
+                Ok(RegistryCredentials {
+                    registry: provider.clone(),
+                    username: SensitiveString::new("oauth2accesstoken"),
+                    password: SensitiveString::new(token_value),
+                })
+            }
         }
     }
 
@@ -399,6 +452,95 @@ impl CredentialResolver {
         })
     }
 
+    /// Resolve credentials from a user-owned binding stored in the orchestrator's
+    /// `credential_bindings` / `credential_grants` tables, which this gateway reads
+    /// directly via its shared `PgPool`.
+    ///
+    /// Returns an empty `Vec` when:
+    /// - No `PgPool` is available (SQLite mode).
+    /// - No Zaru user token / `user_id` claim is present in the session.
+    /// - No active binding exists for the requested provider and user.
+    ///
+    /// The caller is responsible for falling back to an alternative path.
+    async fn resolve_user_bound(
+        &self,
+        provider: &str,
+        zaru_user_token: Option<&str>,
+        tenant_id: Option<&str>,
+    ) -> Result<Vec<(String, SensitiveString)>, GatewayError> {
+        let pool = match &self.pool {
+            Some(p) => p,
+            None => return Ok(vec![]),
+        };
+
+        // Extract the user_id from the Zaru JWT without full validation — the token
+        // was already validated upstream by the auth middleware.  We only need the
+        // `sub` claim, which is the canonical user identifier in Keycloak.
+        let user_id = match zaru_user_token {
+            Some(token) => extract_jwt_sub(token)?,
+            None => return Ok(vec![]),
+        };
+
+        if provider.trim().is_empty() {
+            return Err(GatewayError::Validation(
+                "UserBound provider cannot be empty".to_string(),
+            ));
+        }
+
+        // Query the active binding for this user + provider, scoped to the tenant.
+        // `credential_grants` encodes which agents (or all agents) may use the binding.
+        // The gateway trusts that the orchestrator's grant check was already enforced
+        // at invocation time; here we only enforce user ownership and provider match.
+        struct BindingRow {
+            secret_path: String,
+        }
+
+        let row: Option<BindingRow> = sqlx::query_as!(
+            BindingRow,
+            r#"
+            SELECT cb.secret_path
+              FROM credential_bindings cb
+              JOIN credential_grants cg ON cg.credential_binding_id = cb.id
+             WHERE cb.owner_user_id = $1
+               AND cb.provider      = $2
+               AND cb.status        = 'active'
+               AND (
+                     cb.tenant_id IS NULL
+                  OR cb.tenant_id = $3
+               )
+             LIMIT 1
+            "#,
+            user_id,
+            provider,
+            tenant_id.unwrap_or(""),
+        )
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| GatewayError::Database(e.to_string()))?;
+
+        let binding = match row {
+            Some(b) => b,
+            None => return Ok(vec![]),
+        };
+
+        // Read the secret from OpenBao using the KV path stored in the binding.
+        let fields = self.fetch_kv_fields(&binding.secret_path).await?;
+        let token = fields
+            .get("token")
+            .cloned()
+            .or_else(|| fields.get("value").cloned())
+            .ok_or_else(|| {
+                GatewayError::Serialization(
+                    "user-bound OpenBao KV secret missing token/value field".to_string(),
+                )
+            })?;
+
+        Ok(vec![(
+            "Authorization".to_string(),
+            SensitiveString::new(format!("Bearer {token}")),
+        )])
+    }
+
     async fn resolve_human_delegated(
         &self,
         target_service: &str,
@@ -476,6 +618,28 @@ impl CredentialResolver {
             SensitiveString::new(format!("Bearer {}", payload.access_token)),
         )])
     }
+}
+
+/// Decode the `sub` claim from a JWT without signature verification.
+///
+/// The token has already been verified by the auth middleware upstream; here we
+/// only need the subject identifier to scope the `credential_bindings` query.
+fn extract_jwt_sub(token: &str) -> Result<String, GatewayError> {
+    let parts: Vec<&str> = token.splitn(3, '.').collect();
+    if parts.len() < 2 {
+        return Err(GatewayError::Unauthorized);
+    }
+    use base64::Engine as _;
+    let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(parts[1])
+        .map_err(|_| GatewayError::Unauthorized)?;
+    let claims: serde_json::Value =
+        serde_json::from_slice(&payload).map_err(|_| GatewayError::Unauthorized)?;
+    claims
+        .get("sub")
+        .and_then(|v| v.as_str())
+        .map(ToString::to_string)
+        .ok_or(GatewayError::Unauthorized)
 }
 
 /// Prefix an OpenBao engine path with `tenant-{slug}/` when a tenant slug is provided.
