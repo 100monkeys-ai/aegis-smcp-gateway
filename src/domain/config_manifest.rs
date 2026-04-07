@@ -68,6 +68,10 @@ pub struct GatewayAuthConfig {
     pub seal_jwt_issuer: String,
     #[serde(default = "default_seal_jwt_audience")]
     pub seal_jwt_audience: String,
+    /// Deployment-defined JWT claim name carrying the operator role (ADR-088 S6).
+    /// Defaults to "aegis_role" if absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operator_role_claim: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -149,6 +153,7 @@ impl Default for GatewayAuthConfig {
             seal_jwt_public_key_pem: String::new(),
             seal_jwt_issuer: default_seal_jwt_issuer(),
             seal_jwt_audience: default_seal_jwt_audience(),
+            operator_role_claim: None,
         }
     }
 }
@@ -304,6 +309,11 @@ impl SealGatewayConfigManifest {
         if let Ok(value) = std::env::var("SEAL_GATEWAY_OPERATOR_JWT_ISSUER") {
             if !value.trim().is_empty() {
                 self.spec.auth.operator_jwt_issuer = value;
+            }
+        }
+        if let Ok(value) = std::env::var("SEAL_GATEWAY_OPERATOR_ROLE_CLAIM") {
+            if !value.trim().is_empty() {
+                self.spec.auth.operator_role_claim = Some(value);
             }
         }
         if let Ok(value) = std::env::var("SEAL_GATEWAY_OPERATOR_JWT_AUDIENCE") {

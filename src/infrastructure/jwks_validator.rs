@@ -6,6 +6,8 @@ use axum::http::StatusCode;
 use jsonwebtoken::{decode, decode_header, Algorithm, DecodingKey, Validation};
 use reqwest::Client;
 use serde::Deserialize;
+use serde_json::Value;
+use std::collections::HashMap;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 use tracing::{debug, warn};
@@ -46,6 +48,25 @@ pub struct JwtClaims {
     pub aegis_role: Option<String>,
     #[serde(default)]
     pub tenant_id: Option<String>,
+    /// Captures all other JWT claims for runtime-configurable lookups (ADR-088 S6).
+    #[serde(flatten)]
+    pub extra: HashMap<String, Value>,
+}
+
+impl JwtClaims {
+    /// Returns the string value of a JWT claim by name.
+    /// Checks typed fields first, then the extra map.
+    pub fn get_claim(&self, name: &str) -> Option<String> {
+        match name {
+            "aegis_role" => self.aegis_role.clone(),
+            "tenant_id" => self.tenant_id.clone(),
+            other => self
+                .extra
+                .get(other)
+                .and_then(|v| v.as_str())
+                .map(str::to_owned),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -166,5 +187,39 @@ impl JwksValidator {
         })?;
 
         Ok(token_data.claims)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_jwt_claims_default_aegis_role() {
+        let json = r#"{"aegis_role": "aegis:admin", "tenant_id": "tenant-a"}"#;
+        let claims: JwtClaims = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            claims.get_claim("aegis_role"),
+            Some("aegis:admin".to_owned())
+        );
+        assert_eq!(claims.get_claim("tenant_id"), Some("tenant-a".to_owned()));
+    }
+
+    #[test]
+    fn test_jwt_claims_custom_role_claim() {
+        let json = r#"{"my_role": "aegis:operator"}"#;
+        let claims: JwtClaims = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            claims.get_claim("my_role"),
+            Some("aegis:operator".to_owned())
+        );
+        assert!(claims.aegis_role.is_none());
+    }
+
+    #[test]
+    fn test_jwt_claims_get_claim_missing() {
+        let json = r#"{}"#;
+        let claims: JwtClaims = serde_json::from_str(json).unwrap();
+        assert_eq!(claims.get_claim("nonexistent"), None);
     }
 }

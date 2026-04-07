@@ -10,6 +10,8 @@ pub struct GatewayConfig {
     pub operator_jwt_issuer: String,
     pub operator_jwt_audience: String,
     pub auth_disabled: bool,
+    /// JWT claim name used to determine operator role (ADR-088 S6). Default: "aegis_role".
+    pub operator_role_claim: String,
     pub seal_jwt_public_key_pem: String,
     pub seal_jwt_issuer: String,
     pub seal_jwt_audience: String,
@@ -48,6 +50,12 @@ impl GatewayConfig {
             operator_jwt_issuer: manifest.spec.auth.operator_jwt_issuer,
             operator_jwt_audience: manifest.spec.auth.operator_jwt_audience,
             auth_disabled: manifest.spec.auth.disabled,
+            operator_role_claim: manifest
+                .spec
+                .auth
+                .operator_role_claim
+                .clone()
+                .unwrap_or_else(|| "aegis_role".to_string()),
             seal_jwt_public_key_pem: manifest.spec.auth.seal_jwt_public_key_pem,
             seal_jwt_issuer: manifest.spec.auth.seal_jwt_issuer,
             seal_jwt_audience: manifest.spec.auth.seal_jwt_audience,

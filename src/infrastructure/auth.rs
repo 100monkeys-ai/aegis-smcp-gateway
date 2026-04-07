@@ -8,7 +8,6 @@ use axum::{
 use base64::Engine;
 
 use crate::infrastructure::config::GatewayConfig;
-use crate::infrastructure::jwks_validator::JwtClaims;
 use crate::presentation::state::AppState;
 
 pub async fn require_operator(
@@ -100,11 +99,28 @@ fn decode_jwt_tenant_id_unverified(token: &str) -> Option<String> {
 #[derive(Debug, Clone)]
 pub struct TenantContext(pub Option<String>);
 
+fn check_operator_role(
+    claims: &crate::infrastructure::jwks_validator::JwtClaims,
+    claim_name: &str,
+) -> Result<Option<String>, axum::http::StatusCode> {
+    match claims.get_claim(claim_name).as_deref() {
+        Some("aegis:admin") | Some("aegis:operator") => Ok(claims.tenant_id.clone()),
+        Some(role) => {
+            tracing::warn!(role = %role, "Insufficient role for SEAL operator access");
+            Err(axum::http::StatusCode::FORBIDDEN)
+        }
+        None => {
+            tracing::warn!("Missing {} claim in operator JWT", claim_name);
+            Err(axum::http::StatusCode::FORBIDDEN)
+        }
+    }
+}
+
 pub async fn verify_operator_token(
     config: &GatewayConfig,
     token: &str,
 ) -> Result<Option<String>, StatusCode> {
-    let claims: JwtClaims = config
+    let claims = config
         .jwks_validator
         .validate(
             token,
@@ -112,15 +128,76 @@ pub async fn verify_operator_token(
             &config.operator_jwt_audience,
         )
         .await?;
-    match claims.aegis_role.as_deref() {
-        Some("aegis:admin") | Some("aegis:operator") => Ok(claims.tenant_id),
-        Some(role) => {
-            tracing::warn!(role = %role, "Insufficient role for SEAL operator access");
-            Err(StatusCode::FORBIDDEN)
+    check_operator_role(&claims, &config.operator_role_claim)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::infrastructure::jwks_validator::JwtClaims;
+    use std::collections::HashMap;
+
+    fn claims_with_role(claim_name: &str, role: &str) -> JwtClaims {
+        let mut extra = HashMap::new();
+        if claim_name != "aegis_role" {
+            extra.insert(
+                claim_name.to_owned(),
+                serde_json::Value::String(role.to_owned()),
+            );
+            JwtClaims {
+                aegis_role: None,
+                tenant_id: Some("tenant-x".to_owned()),
+                extra,
+            }
+        } else {
+            JwtClaims {
+                aegis_role: Some(role.to_owned()),
+                tenant_id: Some("tenant-x".to_owned()),
+                extra,
+            }
         }
-        None => {
-            tracing::warn!("Missing aegis_role claim in operator JWT");
-            Err(StatusCode::FORBIDDEN)
+    }
+
+    fn claims_without_role() -> JwtClaims {
+        JwtClaims {
+            aegis_role: None,
+            tenant_id: None,
+            extra: HashMap::new(),
         }
+    }
+
+    #[test]
+    fn test_role_check_admin() {
+        let claims = claims_with_role("aegis_role", "aegis:admin");
+        let result = check_operator_role(&claims, "aegis_role");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_role_check_operator() {
+        let claims = claims_with_role("aegis_role", "aegis:operator");
+        let result = check_operator_role(&claims, "aegis_role");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_role_check_wrong_role() {
+        let claims = claims_with_role("aegis_role", "aegis:viewer");
+        let result = check_operator_role(&claims, "aegis_role");
+        assert_eq!(result.unwrap_err(), axum::http::StatusCode::FORBIDDEN);
+    }
+
+    #[test]
+    fn test_role_check_missing_claim() {
+        let claims = claims_without_role();
+        let result = check_operator_role(&claims, "aegis_role");
+        assert_eq!(result.unwrap_err(), axum::http::StatusCode::FORBIDDEN);
+    }
+
+    #[test]
+    fn test_role_check_custom_claim_name() {
+        let claims = claims_with_role("my_role", "aegis:admin");
+        let result = check_operator_role(&claims, "my_role");
+        assert!(result.is_ok());
     }
 }
