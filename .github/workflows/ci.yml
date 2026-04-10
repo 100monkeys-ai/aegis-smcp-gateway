@@ -104,4 +104,4 @@ jobs:
           fi
       - name: Verify package includes all required files
         working-directory: aegis-seal-gateway
-        run: cargo package --no-verify --locked
+        run: cargo package --no-verify --locked --allow-dirty
