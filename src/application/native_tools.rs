@@ -303,6 +303,109 @@ pub fn native_tool_catalog() -> Vec<NativeToolMeta> {
                 }
             }),
         },
+        NativeToolMeta {
+            name: "aegis.script.save",
+            description: "Persist a TypeScript program to the caller's script library. Name must be unique per tenant (409 on duplicate). Returns the saved script with its assigned id and version=1.",
+            input_schema: json!({
+                "type": "object",
+                "required": ["name", "code"],
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Unique script name (≤128 bytes, no '/' or '\\\\')"
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Optional free-form description (≤2 KiB)"
+                    },
+                    "code": {
+                        "type": "string",
+                        "description": "TypeScript program source (≤256 KiB)"
+                    },
+                    "tags": {
+                        "type": "array",
+                        "description": "Optional tags (lowercase alnum + dash/underscore, ≤32 chars each, ≤16 tags)",
+                        "items": { "type": "string" }
+                    }
+                }
+            }),
+        },
+        NativeToolMeta {
+            name: "aegis.script.list",
+            description: "List the caller's saved scripts. Optional filters for tag and name substring. Returns an array of script DTOs (no versions field).",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "tag": {
+                        "type": "string",
+                        "description": "Filter scripts that contain this tag"
+                    },
+                    "q": {
+                        "type": "string",
+                        "description": "Case-insensitive name substring filter"
+                    }
+                }
+            }),
+        },
+        NativeToolMeta {
+            name: "aegis.script.get",
+            description: "Retrieve a saved script by ID including version history. Returns 404 for scripts the caller does not own.",
+            input_schema: json!({
+                "type": "object",
+                "required": ["id"],
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "description": "UUID of the saved script"
+                    }
+                }
+            }),
+        },
+        NativeToolMeta {
+            name: "aegis.script.update",
+            description: "Update a saved script. Bumps version monotonically and appends to the script's version history. Returns the updated script DTO.",
+            input_schema: json!({
+                "type": "object",
+                "required": ["id", "name", "code"],
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "description": "UUID of the saved script"
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "Script name (≤128 bytes)"
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Optional free-form description"
+                    },
+                    "code": {
+                        "type": "string",
+                        "description": "TypeScript program source (≤256 KiB)"
+                    },
+                    "tags": {
+                        "type": "array",
+                        "description": "Optional tags",
+                        "items": { "type": "string" }
+                    }
+                }
+            }),
+        },
+        NativeToolMeta {
+            name: "aegis.script.delete",
+            description: "Soft-delete a saved script. The caller's name reservation is released; version history is retained for audit. Returns no body.",
+            input_schema: json!({
+                "type": "object",
+                "required": ["id"],
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "description": "UUID of the saved script"
+                    }
+                }
+            }),
+        },
     ]
 }
 
@@ -588,6 +691,78 @@ impl NativeToolEngine {
                 wrap_response(status, response)
             }
 
+            "aegis.script.save" => {
+                // Require fields up-front so we fail fast with a clear error;
+                // the orchestrator re-validates length/charset limits.
+                let _name = require_str(args, "name")?;
+                let _code = require_str(args, "code")?;
+                let body = args.clone();
+                let (status, response) = self
+                    .http_client
+                    .execute("POST", &format!("{base}/v1/scripts"), &headers, Some(body))
+                    .await?;
+                wrap_response(status, response)
+            }
+
+            "aegis.script.list" => {
+                let mut query_parts: Vec<String> = Vec::new();
+                if let Some(tag) = args.get("tag").and_then(|v| v.as_str()) {
+                    query_parts.push(format!("tag={}", urlencoded(tag)));
+                }
+                if let Some(q) = args.get("q").and_then(|v| v.as_str()) {
+                    query_parts.push(format!("q={}", urlencoded(q)));
+                }
+                let url = if query_parts.is_empty() {
+                    format!("{base}/v1/scripts")
+                } else {
+                    format!("{base}/v1/scripts?{}", query_parts.join("&"))
+                };
+                let (status, response) = self
+                    .http_client
+                    .execute("GET", &url, &headers, None)
+                    .await?;
+                wrap_response(status, response)
+            }
+
+            "aegis.script.get" => {
+                let id = require_str(args, "id")?;
+                let (status, response) = self
+                    .http_client
+                    .execute("GET", &format!("{base}/v1/scripts/{id}"), &headers, None)
+                    .await?;
+                wrap_response(status, response)
+            }
+
+            "aegis.script.update" => {
+                let id = require_str(args, "id")?;
+                let _name = require_str(args, "name")?;
+                let _code = require_str(args, "code")?;
+                // Forward everything except `id`; the path carries it.
+                let mut body = args.clone();
+                if let Some(obj) = body.as_object_mut() {
+                    obj.remove("id");
+                }
+                let (status, response) = self
+                    .http_client
+                    .execute(
+                        "PUT",
+                        &format!("{base}/v1/scripts/{id}"),
+                        &headers,
+                        Some(body),
+                    )
+                    .await?;
+                wrap_response(status, response)
+            }
+
+            "aegis.script.delete" => {
+                let id = require_str(args, "id")?;
+                let (status, response) = self
+                    .http_client
+                    .execute("DELETE", &format!("{base}/v1/scripts/{id}"), &headers, None)
+                    .await?;
+                wrap_response(status, response)
+            }
+
             other => Err(GatewayError::NotFound(format!(
                 "native tool '{other}' not found"
             ))),
@@ -664,8 +839,8 @@ mod tests {
 
     #[test]
     fn catalog_contains_all_native_tools() {
-        // 9 volume/file tools + 8 git tools = 17
-        assert_eq!(native_tool_catalog().len(), 17);
+        // 9 volume/file tools + 8 git tools + 5 script tools = 22
+        assert_eq!(native_tool_catalog().len(), 22);
     }
 
     #[test]
@@ -813,6 +988,133 @@ mod tests {
         // Negatives
         assert!(!is_native_tool("aegis.git"));
         assert!(!is_native_tool("aegis.git.unknown"));
+    }
+
+    #[test]
+    fn catalog_contains_all_script_tools() {
+        let names: Vec<&str> = native_tool_catalog().iter().map(|m| m.name).collect();
+        for expected in [
+            "aegis.script.save",
+            "aegis.script.list",
+            "aegis.script.get",
+            "aegis.script.update",
+            "aegis.script.delete",
+        ] {
+            assert!(
+                names.contains(&expected),
+                "catalog missing script tool '{expected}'"
+            );
+        }
+    }
+
+    #[test]
+    fn script_save_schema_requires_name_and_code() {
+        let meta = native_tool_catalog()
+            .into_iter()
+            .find(|m| m.name == "aegis.script.save")
+            .expect("aegis.script.save must be registered");
+        let required = meta
+            .input_schema
+            .get("required")
+            .and_then(|v| v.as_array())
+            .expect("aegis.script.save schema must declare required fields");
+        let required_names: Vec<&str> = required.iter().filter_map(|v| v.as_str()).collect();
+        assert!(required_names.contains(&"name"));
+        assert!(required_names.contains(&"code"));
+        assert!(
+            !required_names.contains(&"description"),
+            "description must be optional"
+        );
+        assert!(!required_names.contains(&"tags"), "tags must be optional");
+        let props = meta
+            .input_schema
+            .get("properties")
+            .and_then(|v| v.as_object())
+            .expect("aegis.script.save must define properties");
+        assert!(props.contains_key("description"));
+        assert!(props.contains_key("tags"));
+        assert_eq!(
+            props
+                .get("tags")
+                .and_then(|v| v.get("type"))
+                .and_then(|v| v.as_str()),
+            Some("array"),
+            "'tags' must be an array"
+        );
+    }
+
+    #[test]
+    fn script_list_schema_has_no_required_fields() {
+        let meta = native_tool_catalog()
+            .into_iter()
+            .find(|m| m.name == "aegis.script.list")
+            .expect("aegis.script.list must be registered");
+        assert!(
+            meta.input_schema.get("required").is_none(),
+            "aegis.script.list should have no required fields"
+        );
+        let props = meta
+            .input_schema
+            .get("properties")
+            .and_then(|v| v.as_object())
+            .expect("aegis.script.list must define properties");
+        assert!(props.contains_key("tag"));
+        assert!(props.contains_key("q"));
+    }
+
+    #[test]
+    fn script_get_and_delete_schema_require_id_only() {
+        for name in ["aegis.script.get", "aegis.script.delete"] {
+            let meta = native_tool_catalog()
+                .into_iter()
+                .find(|m| m.name == name)
+                .unwrap_or_else(|| panic!("{name} must be registered"));
+            let required = meta
+                .input_schema
+                .get("required")
+                .and_then(|v| v.as_array())
+                .unwrap_or_else(|| panic!("{name} schema must declare required fields"));
+            let required_names: Vec<&str> = required.iter().filter_map(|v| v.as_str()).collect();
+            assert_eq!(required_names, vec!["id"], "{name} required");
+        }
+    }
+
+    #[test]
+    fn script_update_schema_requires_id_name_and_code() {
+        let meta = native_tool_catalog()
+            .into_iter()
+            .find(|m| m.name == "aegis.script.update")
+            .expect("aegis.script.update must be registered");
+        let required = meta
+            .input_schema
+            .get("required")
+            .and_then(|v| v.as_array())
+            .expect("aegis.script.update schema must declare required fields");
+        let required_names: Vec<&str> = required.iter().filter_map(|v| v.as_str()).collect();
+        assert!(required_names.contains(&"id"));
+        assert!(required_names.contains(&"name"));
+        assert!(required_names.contains(&"code"));
+        assert!(
+            !required_names.contains(&"description"),
+            "description must be optional on update"
+        );
+        assert!(
+            !required_names.contains(&"tags"),
+            "tags must be optional on update"
+        );
+    }
+
+    #[test]
+    fn is_native_tool_matches_script_tools() {
+        assert!(is_native_tool("aegis.script.save"));
+        assert!(is_native_tool("aegis.script.list"));
+        assert!(is_native_tool("aegis.script.get"));
+        assert!(is_native_tool("aegis.script.update"));
+        assert!(is_native_tool("aegis.script.delete"));
+        // Negatives
+        assert!(!is_native_tool("aegis.script"));
+        assert!(!is_native_tool("aegis.script.run"));
+        assert!(!is_native_tool("aegis.script.unknown"));
     }
 
     #[test]
