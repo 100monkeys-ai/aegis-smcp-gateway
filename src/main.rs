@@ -62,7 +62,8 @@ async fn main() -> anyhow::Result<()> {
         {
             let store = PostgresStore::new(&config.database_url).await?;
             // Expose the pool to CredentialResolver for UserBound resolution.
-            credential_pg_pool = Some(sqlx::PgPool::connect(&config.database_url).await?);
+            credential_pg_pool =
+                Some(infrastructure::persistence::postgres::build_pool(&config.database_url).await?);
             (
                 Arc::new(store.clone()),
                 Arc::new(store.clone()),

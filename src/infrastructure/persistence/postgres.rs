@@ -1,5 +1,8 @@
+use std::time::Duration;
+
 use async_trait::async_trait;
 use chrono::Utc;
+use sqlx::postgres::PgPoolOptions;
 use sqlx::Row;
 use uuid::Uuid;
 
@@ -19,13 +22,39 @@ pub struct PostgresStore {
 
 impl PostgresStore {
     pub async fn new(database_url: &str) -> Result<Self, GatewayError> {
-        let pool = sqlx::PgPool::connect(database_url).await?;
+        let pool = build_pool(database_url).await?;
         sqlx::migrate!("./migrations")
             .run(&pool)
             .await
             .map_err(|e| GatewayError::Database(e.to_string()))?;
         Ok(Self { pool })
     }
+
+    /// Construct a `PostgresStore` from an externally-supplied pool. Used by
+    /// integration tests that need to control pool sizing (e.g. forcing a
+    /// small pool to verify the cleanup batching releases connections between
+    /// iterations).
+    #[cfg(test)]
+    pub fn from_pool(pool: sqlx::PgPool) -> Self {
+        Self { pool }
+    }
+}
+
+/// Build a Postgres connection pool with explicit limits and a short
+/// `acquire_timeout` so that pool starvation surfaces as a fast error rather
+/// than a silent 30 s hang on the request path.
+///
+/// All Postgres pools constructed by the gateway MUST go through this helper
+/// to ensure consistent sizing across the main store and the credential pool
+/// exposed to `CredentialResolver` (`main.rs`).
+pub async fn build_pool(database_url: &str) -> Result<sqlx::PgPool, GatewayError> {
+    Ok(PgPoolOptions::new()
+        .max_connections(50)
+        .min_connections(5)
+        .acquire_timeout(Duration::from_secs(5))
+        .idle_timeout(Some(Duration::from_secs(600)))
+        .connect(database_url)
+        .await?)
 }
 
 #[async_trait]
@@ -566,17 +595,159 @@ impl JtiRepository for PostgresStore {
             "INSERT INTO seen_jtis (jti, expires_at) VALUES ($1, $2) ON CONFLICT (jti) DO NOTHING",
         )
         .bind(jti)
-        .bind(expires_at.to_rfc3339())
+        .bind(expires_at)
         .execute(&self.pool)
         .await?;
         Ok(result.rows_affected() > 0)
     }
 
     async fn cleanup_expired(&self) -> Result<u64, GatewayError> {
-        let result = sqlx::query("DELETE FROM seen_jtis WHERE expires_at < $1")
-            .bind(Utc::now().to_rfc3339())
+        let mut total = 0u64;
+        loop {
+            let result = sqlx::query(
+                "DELETE FROM seen_jtis WHERE jti IN (\
+                     SELECT jti FROM seen_jtis WHERE expires_at < $1 LIMIT 1000\
+                 )",
+            )
+            .bind(Utc::now())
             .execute(&self.pool)
             .await?;
-        Ok(result.rows_affected())
+            let n = result.rows_affected();
+            total += n;
+            if n < 1000 {
+                break;
+            }
+        }
+        Ok(total)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! Regression test for the JTI-cleanup pool-starvation incident.
+    //!
+    //! Before the fix (`fix/seal-gateway-pool-starvation`), `cleanup_expired`
+    //! issued a single unbounded `DELETE FROM seen_jtis WHERE expires_at < $1`
+    //! against a shared connection pool. With 100k+ expired rows on an
+    //! unindexed `TEXT` column the delete held its connection for seconds at a
+    //! time; on the production sqlx-default 10-connection pool every
+    //! concurrent request competing for the pool would starve.
+    //!
+    //! This test reproduces that scenario by:
+    //!
+    //!   1. constraining the pool to a single connection (the same starvation
+    //!      shape as production at peak),
+    //!   2. seeding 100 000 expired `seen_jtis` rows,
+    //!   3. spawning the new batched `cleanup_expired()` and a concurrent
+    //!      `pool.acquire()` representing a request handler,
+    //!   4. asserting the concurrent acquire completes within 2 s.
+    //!
+    //! Without batching the test would hang until cleanup finishes (≫ 2 s
+    //! with 100 000 rows on a single connection). With the batched loop
+    //! cleanup releases the connection between every 1 000-row batch, so the
+    //! concurrent acquire interleaves and returns promptly.
+
+    use super::*;
+    use sqlx::postgres::PgPoolOptions;
+    use sqlx::{ConnectOptions, Row};
+    use std::time::{Duration as StdDuration, Instant};
+
+    /// Build a single-connection pool against the same database as
+    /// `seed_pool`. We can't reuse `seed_pool` directly because we need to
+    /// cap connections at 1 to reproduce the starvation shape — the
+    /// production pool is 50 after the fix, but the *batching* property of
+    /// the cleanup loop is what matters and is most clearly observable when
+    /// the pool is fully saturated by cleanup.
+    async fn one_connection_pool(seed_pool: &sqlx::PgPool) -> sqlx::PgPool {
+        let connect_options = seed_pool.connect_options().as_ref().clone();
+        PgPoolOptions::new()
+            .max_connections(1)
+            .min_connections(1)
+            .acquire_timeout(StdDuration::from_secs(10))
+            .connect_with(connect_options)
+            .await
+            .expect("failed to build single-connection pool")
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn cleanup_does_not_starve_request_path(seed_pool: sqlx::PgPool) {
+        // Insert 100 000 already-expired rows in one bulk statement. Doing
+        // this via `record_jti` would issue 100k round-trips; we want the
+        // test to be about cleanup behaviour, not seeding throughput.
+        let expired = Utc::now() - chrono::Duration::hours(1);
+        sqlx::query(
+            "INSERT INTO seen_jtis (jti, expires_at) \
+             SELECT 'jti-' || g::text, $1 FROM generate_series(1, 100000) AS g",
+        )
+        .bind(expired)
+        .execute(&seed_pool)
+        .await
+        .expect("seeding expired JTIs failed");
+
+        let row_count: i64 = sqlx::query("SELECT COUNT(*) FROM seen_jtis")
+            .fetch_one(&seed_pool)
+            .await
+            .expect("count query failed")
+            .try_get(0)
+            .expect("count column missing");
+        assert_eq!(row_count, 100_000, "seeding produced wrong row count");
+
+        // Constrain the pool to one connection to reproduce the starvation
+        // shape from production.
+        let pool = one_connection_pool(&seed_pool).await;
+        let store = PostgresStore::from_pool(pool.clone());
+
+        // Spawn cleanup; concurrently attempt to acquire a connection. With
+        // the unbatched DELETE the cleanup would hold the only connection
+        // for the full table delete and the observer would block ≥
+        // acquire_timeout.
+        let cleanup_handle = tokio::spawn(async move {
+            let started = Instant::now();
+            let removed = store
+                .cleanup_expired()
+                .await
+                .expect("cleanup_expired failed");
+            (removed, started.elapsed())
+        });
+
+        // Give cleanup a moment to start and grab the connection at least
+        // once, so the acquire below is genuinely contending.
+        tokio::time::sleep(StdDuration::from_millis(50)).await;
+
+        let acquire_start = Instant::now();
+        let acquire_result =
+            tokio::time::timeout(StdDuration::from_secs(2), async { pool.acquire().await }).await;
+        let acquire_elapsed = acquire_start.elapsed();
+
+        let conn = acquire_result.expect(
+            "pool.acquire() exceeded 2s — cleanup is starving the request path (regression)",
+        );
+        let conn = conn.expect("pool.acquire() returned an error");
+        drop(conn);
+
+        let (removed, cleanup_elapsed) = cleanup_handle.await.expect("cleanup task panicked");
+
+        assert!(
+            acquire_elapsed < StdDuration::from_secs(2),
+            "concurrent acquire took {acquire_elapsed:?} — batching did not release the \
+             connection between iterations (regression)"
+        );
+
+        assert_eq!(
+            removed, 100_000,
+            "cleanup_expired drained {removed} rows; expected 100000"
+        );
+
+        let remaining: i64 = sqlx::query("SELECT COUNT(*) FROM seen_jtis")
+            .fetch_one(&seed_pool)
+            .await
+            .expect("post-cleanup count failed")
+            .try_get(0)
+            .expect("count column missing");
+        assert_eq!(remaining, 0, "expired rows not fully drained");
+
+        eprintln!(
+            "cleanup drained 100k rows in {cleanup_elapsed:?}; concurrent acquire returned in {acquire_elapsed:?}"
+        );
     }
 }

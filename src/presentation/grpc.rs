@@ -495,6 +495,13 @@ fn invalid(err: crate::infrastructure::errors::GatewayError) -> Status {
 }
 
 fn internal(err: crate::infrastructure::errors::GatewayError) -> Status {
+    if err.is_pool_timeout() {
+        tracing::error!(
+            handler = "grpc",
+            error = %err,
+            "database pool acquire timed out — request path starved"
+        );
+    }
     Status::internal(err.to_string())
 }
 

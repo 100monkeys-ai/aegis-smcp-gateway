@@ -145,6 +145,8 @@ pub enum GatewayError {
     Forbidden,
     #[error("database error: {0}")]
     Database(String),
+    #[error("database pool acquire timeout")]
+    PoolTimeout,
     #[error("http error: {0}")]
     Http(String),
     #[error("seal error: {0}")]
@@ -157,7 +159,20 @@ pub enum GatewayError {
 
 impl From<sqlx::Error> for GatewayError {
     fn from(value: sqlx::Error) -> Self {
-        Self::Database(value.to_string())
+        match value {
+            sqlx::Error::PoolTimedOut => Self::PoolTimeout,
+            other => Self::Database(other.to_string()),
+        }
+    }
+}
+
+impl GatewayError {
+    /// Returns true if this error was caused by the database connection pool
+    /// failing to hand out a connection within `acquire_timeout`. Used by
+    /// request handlers to emit a structured `error!` log before propagating —
+    /// pool starvation is otherwise invisible in the request path.
+    pub fn is_pool_timeout(&self) -> bool {
+        matches!(self, Self::PoolTimeout)
     }
 }
 

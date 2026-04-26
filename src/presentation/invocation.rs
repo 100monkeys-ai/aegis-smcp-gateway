@@ -15,6 +15,7 @@ use crate::presentation::state::AppState;
 /// `GatewayError::Seal` variants produce a structured `SealErrorResponse`;
 /// all other variants fall through to the generic `error_response`.
 fn seal_error_response(err: GatewayError) -> (StatusCode, Json<Value>) {
+    log_pool_timeout("invoke_seal", &err);
     match err {
         GatewayError::Seal(ref msg) => {
             let code = classify_seal_error(msg);
@@ -77,6 +78,23 @@ pub async fn explore_api(
         .explorer_service
         .explore(req, None)
         .await
-        .map_err(error_response)?;
+        .map_err(|err| {
+            log_pool_timeout("explore_api", &err);
+            error_response(err)
+        })?;
     Ok(Json(json!(result)))
+}
+
+/// Emit a structured `error!` log when a request handler fails because the
+/// Postgres pool's `acquire_timeout` elapsed. Without this log, pool
+/// starvation incidents leave no trace in the request path — the gateway
+/// just appears unreachable while every handler hangs on `pool.acquire()`.
+fn log_pool_timeout(handler: &'static str, err: &GatewayError) {
+    if err.is_pool_timeout() {
+        tracing::error!(
+            handler = handler,
+            error = %err,
+            "database pool acquire timed out — request path starved"
+        );
+    }
 }
