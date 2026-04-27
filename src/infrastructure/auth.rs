@@ -162,10 +162,6 @@ impl TenantContext {
             identity_kind,
         }
     }
-
-    pub fn is_service_account(&self) -> bool {
-        matches!(self.identity_kind, IdentityKind::ServiceAccount)
-    }
 }
 
 // Backwards-compatible accessor: many call sites still read `tenant.0`.

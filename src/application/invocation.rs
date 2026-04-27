@@ -11,6 +11,7 @@ use crate::domain::{
     EphemeralCliToolRepository, JtiRepository, SealSessionRepository, SealSessionStatus,
     SecurityContextRepository, ToolWorkflow, WorkflowId,
 };
+use crate::infrastructure::auth::IdentityKind;
 use crate::infrastructure::config::GatewayConfig;
 use crate::infrastructure::errors::GatewayError;
 use crate::infrastructure::persistence::EventStore;
@@ -60,6 +61,7 @@ impl InvocationService {
         &self,
         envelope: SealEnvelope,
         zaru_user_token: Option<&str>,
+        authenticated_identity_kind: IdentityKind,
     ) -> Result<Value, GatewayError> {
         let unsecured_claims: serde_json::Value = decode_unverified(&envelope.security_token)?;
         let execution_id = unsecured_claims
@@ -214,12 +216,13 @@ impl InvocationService {
                     zaru_user_token: zaru_user_token.map(ToString::to_string),
                     allow_human_delegated_credentials: allow_human_delegated,
                     authenticated_tenant,
-                    // SEAL sessions are issued to specific agent identities;
-                    // in the current design these are not service accounts.
-                    // If/when SEAL sessions are extended to carry an
-                    // identity_kind claim, plumb it through here.
-                    authenticated_identity_kind:
-                        crate::infrastructure::auth::IdentityKind::Consumer,
+                    // Per ADR-100, the identity kind is derived from the
+                    // verified JWT claims by the SEAL middleware
+                    // (`inject_seal_tenant_context`) and propagated here so
+                    // service-account callers may delegate `tenant_id` while
+                    // consumer callers remain bound to their authenticated
+                    // tenant.
+                    authenticated_identity_kind,
                 })
                 .await
         } else {
